@@ -101,6 +101,78 @@ class TestSupervisorAgent:
 
         assert "PediatricsAgent" in specialists
 
+    def test_routing_anxiety_activates_psychiatry(self, mock_llm):
+        """Mental health presentation should activate PsychiatryAgent."""
+        from agents.supervisor import SupervisorAgent
+
+        agent = SupervisorAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"age": 28, "chief_complaint": "severe anxiety and panic attacks"},
+            "medical_images": [],
+            "agent_outputs": {},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch.object(agent, "_determine_specialists") as mock_det:
+            mock_det.return_value = ["PsychiatryAgent"]
+            specialists = agent.route(state)
+
+        assert "PsychiatryAgent" in specialists
+
+    def test_routing_trauma_activates_emergency(self, mock_llm):
+        """Trauma presentation should activate EmergencyMedicineAgent."""
+        from agents.supervisor import SupervisorAgent
+
+        agent = SupervisorAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"age": 35, "chief_complaint": "multiple injuries from MVA"},
+            "medical_images": [],
+            "agent_outputs": {},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch.object(agent, "_determine_specialists") as mock_det:
+            mock_det.return_value = ["EmergencyMedicineAgent", "RadiologyAgent"]
+            specialists = agent.route(state)
+
+        assert "EmergencyMedicineAgent" in specialists
+
+    def test_routing_skin_lesion_activates_dermatology(self, mock_llm):
+        """Skin lesion presentation should activate DermatologyAgent."""
+        from agents.supervisor import SupervisorAgent
+
+        agent = SupervisorAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"age": 45, "chief_complaint": "growing mole with irregular borders"},
+            "medical_images": [],
+            "agent_outputs": {},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch.object(agent, "_determine_specialists") as mock_det:
+            mock_det.return_value = ["DermatologyAgent"]
+            specialists = agent.route(state)
+
+        assert "DermatologyAgent" in specialists
+
     def test_detect_conflict_finds_contradictions(self, mock_llm):
         """detect_conflict() should flag when agents contradict each other."""
         from agents.supervisor import SupervisorAgent

@@ -115,7 +115,8 @@ class SupervisorAgent(BaseAgent):
         Isolated for mocking in tests.
 
         In production, the LLM analyzes patient_context to select from:
-        CardiologyAgent, OncologyAgent, PediatricsAgent, RadiologyAgent.
+        CardiologyAgent, OncologyAgent, PediatricsAgent, RadiologyAgent,
+        PsychiatryAgent, EmergencyMedicineAgent, DermatologyAgent.
         """
         raise NotImplementedError("Requires MedGemma-27B model")
 
