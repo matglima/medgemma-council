@@ -3,14 +3,40 @@ ModelLoader: VRAM management for MedGemma-Council.
 
 Handles dynamic loading/unloading of models to stay within Kaggle
 dual-T4 GPU constraints (16GB VRAM each). Supports:
-- llama-cpp-python models (MedGemma-27B quantized text)
+- llama-cpp-python models (legacy text inference)
 - transformers pipelines (MedGemma 1.5 4B multimodal)
+- transformers + bitsandbytes quantized models (MedGemma 27B text)
 """
 
 from typing import Any, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _get_torch_memory_stats() -> Dict[str, float]:
+    """
+    Get per-GPU memory usage stats from PyTorch.
+    Isolated for mocking in tests.
+
+    Returns:
+        Dict with gpu_N_used_gb keys and total_used_gb.
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return {"total_used_gb": 0.0}
+
+        stats: Dict[str, float] = {}
+        total = 0.0
+        for i in range(torch.cuda.device_count()):
+            used = torch.cuda.memory_allocated(i) / (1024 ** 3)
+            stats[f"gpu_{i}_used_gb"] = round(used, 2)
+            total += used
+        stats["total_used_gb"] = round(total, 2)
+        return stats
+    except (ImportError, RuntimeError):
+        return {"total_used_gb": 0.0}
 
 
 class ModelLoader:
@@ -134,3 +160,92 @@ class ModelLoader:
         from transformers import pipeline  # type: ignore
 
         return pipeline("image-text-to-text", model=model_id, **kwargs)
+
+    def load_text_model_quantized(
+        self,
+        name: str,
+        model_id: str,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Load a text model with 4-bit quantization via transformers + bitsandbytes.
+
+        Uses NF4 quantization with bfloat16 compute dtype and device_map="auto"
+        for automatic tensor parallelism across available GPUs.
+
+        Args:
+            name: Registry key for the model.
+            model_id: HuggingFace model ID (e.g., "google/medgemma-27b-text-it").
+            **kwargs: Additional args passed to from_pretrained().
+
+        Returns:
+            The loaded quantized model instance.
+        """
+        logger.info(f"Loading quantized text model '{name}' from {model_id}")
+        model = self._load_transformers_quantized(model_id, **kwargs)
+        self.loaded_models[name] = model
+        return model
+
+    def load_vision_model_quantized(
+        self,
+        name: str,
+        model_id: str,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Load a vision model with bfloat16 precision.
+
+        For MedGemma 4B multimodal: ~8GB at bfloat16, fits on single T4.
+
+        Args:
+            name: Registry key for the model.
+            model_id: HuggingFace model ID (e.g., "google/medgemma-4b-it").
+            **kwargs: Additional args passed to pipeline().
+
+        Returns:
+            The loaded vision pipeline instance.
+        """
+        logger.info(f"Loading vision model '{name}' from {model_id} (bfloat16)")
+        model = self._load_transformers_vision_bf16(model_id, **kwargs)
+        self.loaded_models[name] = model
+        return model
+
+    def get_memory_usage(self) -> Dict[str, float]:
+        """
+        Get current GPU memory usage across all devices.
+
+        Returns:
+            Dict with per-GPU usage (gpu_N_used_gb) and total_used_gb.
+        """
+        return _get_torch_memory_stats()
+
+    def _load_transformers_quantized(self, model_id: str, **kwargs: Any) -> Any:
+        """
+        Internal: Load a model with 4-bit NF4 quantization.
+        Isolated for easy mocking in tests.
+        """
+        from transformers import AutoModelForCausalLM  # type: ignore
+
+        from utils.quantization import QuantizationConfig, get_model_kwargs
+
+        qconfig = QuantizationConfig()
+        model_kwargs = get_model_kwargs(qconfig, model_type="text")
+        model_kwargs.update(kwargs)
+
+        return AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
+
+    def _load_transformers_vision_bf16(self, model_id: str, **kwargs: Any) -> Any:
+        """
+        Internal: Load a vision model with bfloat16 precision.
+        Isolated for easy mocking in tests.
+        """
+        import torch
+        from transformers import pipeline  # type: ignore
+
+        return pipeline(
+            "image-text-to-text",
+            model=model_id,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            **kwargs,
+        )

@@ -91,3 +91,54 @@ class TestModelLoader:
             )
             assert "old-model" not in loader.loaded_models
             assert "new-model" in loader.loaded_models
+
+
+class TestQuantizedModelLoading:
+    """Tests for quantized model loading methods (Phase 9)."""
+
+    def test_load_text_model_quantized_registers_model(self):
+        """load_text_model_quantized() should load via transformers + bnb and register."""
+        from utils.model_loader import ModelLoader
+
+        loader = ModelLoader()
+
+        with patch.object(loader, "_load_transformers_quantized") as mock_load:
+            mock_load.return_value = MagicMock()
+            model = loader.load_text_model_quantized(
+                name="medgemma-27b-q4",
+                model_id="google/medgemma-27b-text-it",
+            )
+
+        assert "medgemma-27b-q4" in loader.loaded_models
+        assert model is not None
+        mock_load.assert_called_once()
+
+    def test_load_vision_model_quantized_registers_model(self):
+        """load_vision_model_quantized() should load with bfloat16 and register."""
+        from utils.model_loader import ModelLoader
+
+        loader = ModelLoader()
+
+        with patch.object(loader, "_load_transformers_vision_bf16") as mock_load:
+            mock_load.return_value = MagicMock()
+            model = loader.load_vision_model_quantized(
+                name="medgemma-4b-vision",
+                model_id="google/medgemma-4b-it",
+            )
+
+        assert "medgemma-4b-vision" in loader.loaded_models
+        assert model is not None
+        mock_load.assert_called_once()
+
+    def test_get_memory_usage_returns_dict(self):
+        """get_memory_usage() should return a dict with per-GPU memory info."""
+        from utils.model_loader import ModelLoader
+
+        loader = ModelLoader()
+
+        with patch("utils.model_loader._get_torch_memory_stats") as mock_stats:
+            mock_stats.return_value = {"gpu_0_used_gb": 5.2, "gpu_1_used_gb": 4.8, "total_used_gb": 10.0}
+            usage = loader.get_memory_usage()
+
+        assert isinstance(usage, dict)
+        assert "total_used_gb" in usage

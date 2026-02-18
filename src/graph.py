@@ -32,6 +32,8 @@ from agents.specialists import (
 )
 from agents.radiology import RadiologyAgent
 
+from utils.model_factory import ModelFactory
+
 logger = logging.getLogger(__name__)
 
 # Maximum debate rounds before forcing synthesis
@@ -85,14 +87,14 @@ class CouncilState(TypedDict):
 
 def _make_supervisor() -> SupervisorAgent:
     """Create a SupervisorAgent. Tests patch graph.SupervisorAgent."""
-    from unittest.mock import MagicMock
-    return SupervisorAgent(llm=MagicMock())
+    factory = ModelFactory()
+    return SupervisorAgent(llm=factory.create_text_model())
 
 
 def _make_researcher() -> ResearchAgent:
     """Create a ResearchAgent. Tests patch graph.ResearchAgent."""
-    from unittest.mock import MagicMock
-    return ResearchAgent(llm=MagicMock(), pubmed_email="council@medgemma.ai")
+    factory = ModelFactory()
+    return ResearchAgent(llm=factory.create_text_model(), pubmed_email="council@medgemma.ai")
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +110,7 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
     Parses the supervisor's routing output to determine which specialists
     to instantiate and run.
     """
-    from unittest.mock import MagicMock
+    factory = ModelFactory()
 
     # Parse which specialists were activated from supervisor output
     supervisor_output = ""
@@ -140,8 +142,7 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
     if not activated:
         activated = ["CardiologyAgent"]
 
-    # TODO: In production, use ModelLoader to load/swap models per agent
-    llm = MagicMock()  # Placeholder — replaced by real model at deploy time
+    llm = factory.create_text_model()
 
     outputs: Dict[str, str] = {}
     for agent_name in activated:
@@ -170,7 +171,7 @@ def _run_debate_round(state: Dict[str, Any]) -> List[str]:
     Each specialist critiques others' outputs using the latest
     research findings as evidence.
     """
-    from unittest.mock import MagicMock
+    factory = ModelFactory()
 
     agent_outputs = state.get("agent_outputs", {})
     research = state.get("research_findings", "")
@@ -184,8 +185,7 @@ def _run_debate_round(state: Dict[str, Any]) -> List[str]:
     if len(specialist_outputs) < 2:
         return ["No debate needed — fewer than 2 specialists."]
 
-    # TODO: In production, use ModelLoader for real LLM
-    llm = MagicMock()  # Placeholder
+    llm = factory.create_text_model()
 
     arguments = []
     specialist_names = list(specialist_outputs.keys())

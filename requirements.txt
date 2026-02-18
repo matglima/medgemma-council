@@ -9,6 +9,8 @@ gradio>=4.0.0
 # Inference
 torch>=2.1.0
 transformers>=4.38.0
+bitsandbytes>=0.41.0
+accelerate>=0.25.0
 # llama-cpp-python  # Install separately with hardware-specific flags
 
 # RAG
