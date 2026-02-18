@@ -74,29 +74,57 @@ class RAGTool:
         Internal: Execute retrieval against ChromaDB via LlamaIndex.
         Isolated for mocking in tests.
         """
-        # In production, this would use LlamaIndex's VectorStoreIndex
-        # with a ChromaDB backend. Example:
-        #
-        # from llama_index.core import VectorStoreIndex, StorageContext
-        # from llama_index.vector_stores.chroma import ChromaVectorStore
-        # import chromadb
-        #
-        # client = chromadb.PersistentClient(path=self.persist_dir)
-        # collection = client.get_or_create_collection("guidelines")
-        # vector_store = ChromaVectorStore(chroma_collection=collection)
-        # storage_context = StorageContext.from_defaults(vector_store=vector_store)
-        # index = VectorStoreIndex.from_vector_store(vector_store)
-        # query_engine = index.as_query_engine(similarity_top_k=top_k)
-        # response = query_engine.query(query_text)
-        raise NotImplementedError("Requires LlamaIndex + ChromaDB installation")
+        try:
+            from llama_index.core import VectorStoreIndex, StorageContext  # type: ignore
+            from llama_index.vector_stores.chroma import ChromaVectorStore  # type: ignore
+            import chromadb  # type: ignore
+
+            client = chromadb.PersistentClient(path=self.persist_dir)
+            collection = client.get_or_create_collection("guidelines")
+            vector_store = ChromaVectorStore(chroma_collection=collection)
+            index = VectorStoreIndex.from_vector_store(vector_store)
+            query_engine = index.as_query_engine(similarity_top_k=top_k)
+            response = query_engine.query(query_text)
+
+            # Extract source nodes into our standard format
+            results = []
+            for node in getattr(response, "source_nodes", []):
+                results.append({
+                    "text": node.get_content(),
+                    "score": getattr(node, "score", 0.0),
+                })
+            return results
+
+        except ImportError:
+            logger.warning(
+                "LlamaIndex/ChromaDB not installed. "
+                "Install with: pip install llama-index chromadb"
+            )
+            return []
 
     def _ingest_files(self, file_paths: List[str]) -> None:
         """
         Internal: Ingest documents into ChromaDB via LlamaIndex.
         Isolated for mocking in tests.
         """
-        # In production:
-        # from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
-        # documents = SimpleDirectoryReader(input_files=file_paths).load_data()
-        # index = VectorStoreIndex.from_documents(documents, ...)
-        raise NotImplementedError("Requires LlamaIndex + ChromaDB installation")
+        try:
+            from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext  # type: ignore
+            from llama_index.vector_stores.chroma import ChromaVectorStore  # type: ignore
+            import chromadb  # type: ignore
+
+            client = chromadb.PersistentClient(path=self.persist_dir)
+            collection = client.get_or_create_collection("guidelines")
+            vector_store = ChromaVectorStore(chroma_collection=collection)
+            storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+            documents = SimpleDirectoryReader(input_files=file_paths).load_data()
+            VectorStoreIndex.from_documents(
+                documents, storage_context=storage_context
+            )
+            logger.info(f"Ingested {len(file_paths)} files into vector store")
+
+        except ImportError:
+            logger.warning(
+                "LlamaIndex/ChromaDB not installed. "
+                "Install with: pip install llama-index chromadb"
+            )

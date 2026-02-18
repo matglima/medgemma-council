@@ -75,7 +75,62 @@ class _SpecialistAgent(BaseAgent):
         2. Builds a prompt combining system_prompt + guidelines + patient data.
         3. Calls the LLM for clinical analysis.
         """
-        raise NotImplementedError("Requires LLM and RAG infrastructure")
+        patient_context = patient_context or {}
+        peer_outputs = peer_outputs or {}
+        debate_history = debate_history or []
+
+        # 1. Retrieve relevant guidelines from vector store
+        complaint = patient_context.get("chief_complaint", "clinical assessment")
+        try:
+            rag_chunks = self.rag_tool.query(complaint, top_k=3)
+            guideline_context = self.rag_tool.format_context(rag_chunks)
+        except Exception:
+            guideline_context = ""
+
+        # 2. Build the inference prompt
+        prompt_parts = [self.system_prompt, ""]
+
+        if guideline_context:
+            prompt_parts.append(f"Relevant Guidelines:\n{guideline_context}\n")
+
+        prompt_parts.append(
+            f"Patient Context:\n"
+            f"  Age: {patient_context.get('age', 'unknown')}\n"
+            f"  Sex: {patient_context.get('sex', 'unknown')}\n"
+            f"  Chief Complaint: {patient_context.get('chief_complaint', 'not specified')}\n"
+            f"  History: {patient_context.get('history', 'not provided')}\n"
+            f"  Vitals: {patient_context.get('vitals', 'not provided')}\n"
+            f"  Labs: {patient_context.get('labs', 'not provided')}\n"
+            f"  Medications: {patient_context.get('medications', [])}\n"
+        )
+
+        if peer_outputs:
+            prompt_parts.append("Peer Agent Outputs:")
+            for agent_name, output in peer_outputs.items():
+                prompt_parts.append(f"  {agent_name}: {output}")
+            prompt_parts.append("")
+
+        if research_findings:
+            prompt_parts.append(f"Research Findings:\n{research_findings}\n")
+
+        if debate_history:
+            prompt_parts.append("Debate History:")
+            for entry in debate_history:
+                prompt_parts.append(f"  - {entry}")
+            prompt_parts.append("")
+
+        prompt_parts.append(
+            "Provide your clinical analysis with specific guideline citations. "
+            "Include your reasoning, differential diagnosis, and recommendations."
+        )
+
+        prompt = "\n".join(prompt_parts)
+
+        # 3. Call the LLM
+        result = self.llm(prompt, max_tokens=1024)
+        if isinstance(result, dict):
+            return result["choices"][0]["text"]
+        return str(result)
 
 
 class CardiologyAgent(_SpecialistAgent):

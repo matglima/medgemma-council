@@ -118,7 +118,50 @@ class SupervisorAgent(BaseAgent):
         CardiologyAgent, OncologyAgent, PediatricsAgent, RadiologyAgent,
         PsychiatryAgent, EmergencyMedicineAgent, DermatologyAgent.
         """
-        raise NotImplementedError("Requires MedGemma-27B model")
+        patient_context = state.get("patient_context", {})
+        images = state.get("medical_images", [])
+
+        prompt = (
+            f"{self.system_prompt}\n\n"
+            f"Patient Context:\n"
+            f"  Age: {patient_context.get('age', 'unknown')}\n"
+            f"  Sex: {patient_context.get('sex', 'unknown')}\n"
+            f"  Chief Complaint: {patient_context.get('chief_complaint', 'not specified')}\n"
+            f"  History: {patient_context.get('history', 'not provided')}\n"
+            f"  Medications: {patient_context.get('medications', [])}\n"
+            f"  Images available: {len(images)}\n\n"
+            f"Available specialists: CardiologyAgent, OncologyAgent, PediatricsAgent, "
+            f"RadiologyAgent, PsychiatryAgent, EmergencyMedicineAgent, DermatologyAgent.\n\n"
+            f"Return ONLY a comma-separated list of specialist names to activate "
+            f"(e.g., 'CardiologyAgent, RadiologyAgent'). Do not include explanations."
+        )
+
+        result = self.llm(prompt, max_tokens=256)
+        if isinstance(result, dict):
+            text = result["choices"][0]["text"]
+        else:
+            text = str(result)
+
+        # Parse the comma-separated list
+        all_specialists = [
+            "CardiologyAgent", "OncologyAgent", "PediatricsAgent",
+            "RadiologyAgent", "PsychiatryAgent", "EmergencyMedicineAgent",
+            "DermatologyAgent",
+        ]
+        activated = []
+        for name in all_specialists:
+            if name.lower() in text.lower():
+                activated.append(name)
+
+        # Always include RadiologyAgent if images are present
+        if images and "RadiologyAgent" not in activated:
+            activated.append("RadiologyAgent")
+
+        # Fallback: if nothing matched, use a general specialist
+        if not activated:
+            activated = ["CardiologyAgent"]
+
+        return activated
 
     def _check_conflict(self, agent_outputs: Dict[str, str]) -> bool:
         """
@@ -128,14 +171,85 @@ class SupervisorAgent(BaseAgent):
         In production, the LLM compares agent outputs and identifies
         conflicting recommendations (e.g., "Stop Drug A" vs "Increase Drug A").
         """
-        raise NotImplementedError("Requires MedGemma-27B model")
+        if len(agent_outputs) < 2:
+            return False
+
+        # Filter out the supervisor's own output
+        specialist_outputs = {
+            k: v for k, v in agent_outputs.items()
+            if k != self.name
+        }
+
+        if len(specialist_outputs) < 2:
+            return False
+
+        outputs_text = "\n".join(
+            f"  {name}: {finding}" for name, finding in specialist_outputs.items()
+        )
+
+        prompt = (
+            f"{self.system_prompt}\n\n"
+            f"The following specialist agents have provided their findings:\n"
+            f"{outputs_text}\n\n"
+            f"Are there any direct contradictions between these recommendations? "
+            f"Reply with ONLY 'CONFLICT' or 'NO_CONFLICT'."
+        )
+
+        result = self.llm(prompt, max_tokens=64)
+        if isinstance(result, dict):
+            text = result["choices"][0]["text"]
+        else:
+            text = str(result)
+
+        return "conflict" in text.lower() and "no_conflict" not in text.lower()
 
     def _generate_plan(self, state: Dict[str, Any]) -> str:
         """
         Internal: Use the LLM to synthesize the final clinical plan.
         Isolated for mocking in tests.
 
-        In production, aggregates all state information into a prompt
-        and generates a comprehensive management plan.
+        Aggregates all state information into a prompt and generates
+        a comprehensive management plan with citations.
         """
-        raise NotImplementedError("Requires MedGemma-27B model")
+        agent_outputs = state.get("agent_outputs", {})
+        research = state.get("research_findings", "")
+        debate_history = state.get("debate_history", [])
+        patient_context = state.get("patient_context", {})
+
+        prompt_parts = [
+            self.system_prompt,
+            "",
+            f"Patient: Age {patient_context.get('age', 'unknown')}, "
+            f"{patient_context.get('sex', 'unknown')}. "
+            f"Chief Complaint: {patient_context.get('chief_complaint', 'not specified')}.",
+            "",
+            "Specialist Findings:",
+        ]
+        for name, finding in agent_outputs.items():
+            prompt_parts.append(f"  {name}: {finding}")
+
+        if research:
+            prompt_parts.append(f"\nResearch Evidence:\n{research}")
+
+        if debate_history:
+            prompt_parts.append("\nDebate Summary:")
+            for entry in debate_history:
+                prompt_parts.append(f"  - {entry}")
+
+        prompt_parts.append(
+            "\n\nSynthesize all findings into a final clinical management plan. "
+            "Include:\n"
+            "1. Primary Diagnosis\n"
+            "2. Immediate Actions\n"
+            "3. Medications (with dosing if applicable)\n"
+            "4. Follow-up Plan\n"
+            "5. Red Flags to Watch For\n"
+            "Cite specific guidelines for each recommendation."
+        )
+
+        prompt = "\n".join(prompt_parts)
+
+        result = self.llm(prompt, max_tokens=2048)
+        if isinstance(result, dict):
+            return result["choices"][0]["text"]
+        return str(result)

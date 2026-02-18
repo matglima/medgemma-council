@@ -90,10 +90,23 @@ class RadiologyAgent(BaseAgent):
         Internal: Run the vision model on the provided images.
         Isolated for mocking in tests.
 
-        In production, this uses MedGemma 1.5 4B multimodal pipeline:
-            from PIL import Image
-            images = [Image.open(p) for p in image_paths]
-            result = self.llm(images=images, prompt=self._build_prompt(...))
-            return result[0]["generated_text"]
+        Uses MedGemma 1.5 4B multimodal pipeline for image analysis.
+        Falls back gracefully if PIL is not available.
         """
-        raise NotImplementedError("Requires MedGemma 1.5 4B model")
+        try:
+            from PIL import Image  # type: ignore
+            images = [Image.open(p) for p in image_paths]
+        except ImportError:
+            # If PIL not available, pass paths directly
+            images = image_paths
+
+        patient_context = {}  # Will be passed from state in full integration
+        prompt = self._build_prompt(image_paths, patient_context)
+
+        # Call the vision model (transformers pipeline)
+        result = self.llm(images=images, prompt=prompt)
+        if isinstance(result, list) and len(result) > 0:
+            return result[0].get("generated_text", str(result[0]))
+        if isinstance(result, dict):
+            return result.get("generated_text", str(result))
+        return str(result)

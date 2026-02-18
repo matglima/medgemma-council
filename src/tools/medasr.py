@@ -54,10 +54,22 @@ class MedASRTool:
         Internal: Run the ASR pipeline on an audio file.
         Isolated for mocking in tests.
 
-        In production, this would use:
-            from transformers import pipeline
-            asr = pipeline("automatic-speech-recognition", model="google/medasr")
-            result = asr(audio_path)
-            return result["text"]
+        Uses the transformers ASR pipeline for clinical speech transcription.
         """
-        raise NotImplementedError("Requires transformers + MedASR model installation")
+        try:
+            from transformers import pipeline  # type: ignore
+
+            asr = pipeline(
+                "automatic-speech-recognition",
+                model="openai/whisper-small",  # Lightweight default; swap for MedASR in prod
+            )
+            result = asr(audio_path)
+            if isinstance(result, dict):
+                return result.get("text", "")
+            return str(result)
+        except ImportError:
+            logger.warning(
+                "transformers not installed for ASR. "
+                "Install with: pip install transformers"
+            )
+            return "Error: ASR pipeline not available"

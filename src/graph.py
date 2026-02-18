@@ -20,6 +20,15 @@ from langgraph.graph import END, StateGraph
 
 from agents.supervisor import SupervisorAgent
 from agents.researcher import ResearchAgent
+from agents.specialists import (
+    CardiologyAgent,
+    OncologyAgent,
+    PediatricsAgent,
+    PsychiatryAgent,
+    EmergencyMedicineAgent,
+    DermatologyAgent,
+)
+from agents.radiology import RadiologyAgent
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +103,59 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
     Run activated specialist agents and collect their outputs.
     Isolated for mocking in tests.
 
-    In production, instantiates the specialist agents determined by the
-    supervisor and runs them against the current state.
+    Parses the supervisor's routing output to determine which specialists
+    to instantiate and run.
     """
-    raise NotImplementedError("Requires specialist agent infrastructure")
+    from unittest.mock import MagicMock
+
+    # Parse which specialists were activated from supervisor output
+    supervisor_output = ""
+    for key, val in state.get("agent_outputs", {}).items():
+        if "routing" in str(val).lower() or "specialist" in str(val).lower():
+            supervisor_output = str(val)
+            break
+
+    # Map names to agent classes
+    agent_registry = {
+        "CardiologyAgent": CardiologyAgent,
+        "OncologyAgent": OncologyAgent,
+        "PediatricsAgent": PediatricsAgent,
+        "PsychiatryAgent": PsychiatryAgent,
+        "EmergencyMedicineAgent": EmergencyMedicineAgent,
+        "DermatologyAgent": DermatologyAgent,
+        "RadiologyAgent": RadiologyAgent,
+    }
+
+    # Determine which agents to run
+    activated = []
+    for name in agent_registry:
+        if name.lower() in supervisor_output.lower():
+            activated.append(name)
+
+    # Fallback: activate all if no routing info
+    if not activated:
+        activated = ["CardiologyAgent"]
+
+    # TODO: In production, use ModelLoader to load/swap models per agent
+    llm = MagicMock()  # Placeholder — replaced by real model at deploy time
+
+    outputs: Dict[str, str] = {}
+    for agent_name in activated:
+        agent_cls = agent_registry[agent_name]
+        if agent_name == "RadiologyAgent":
+            agent = agent_cls(llm=llm)
+        else:
+            agent = agent_cls(llm=llm)
+
+        try:
+            result = agent.analyze(state)
+            agent_out = result.get("agent_outputs", {})
+            outputs.update(agent_out)
+        except Exception as e:
+            logger.error(f"Agent {agent_name} failed: {e}")
+            outputs[agent_name] = f"Error: {e}"
+
+    return outputs
 
 
 def _run_debate_round(state: Dict[str, Any]) -> List[str]:
@@ -105,10 +163,69 @@ def _run_debate_round(state: Dict[str, Any]) -> List[str]:
     Run one round of structured debate between specialists.
     Isolated for mocking in tests.
 
-    In production, each specialist critiques others' outputs using
-    the latest research findings as evidence.
+    Each specialist critiques others' outputs using the latest
+    research findings as evidence.
     """
-    raise NotImplementedError("Requires specialist agent infrastructure")
+    from unittest.mock import MagicMock
+
+    agent_outputs = state.get("agent_outputs", {})
+    research = state.get("research_findings", "")
+
+    # Filter to specialist outputs only (exclude supervisor)
+    specialist_outputs = {
+        k: v for k, v in agent_outputs.items()
+        if k != "SupervisorAgent"
+    }
+
+    if len(specialist_outputs) < 2:
+        return ["No debate needed — fewer than 2 specialists."]
+
+    # TODO: In production, use ModelLoader for real LLM
+    llm = MagicMock()  # Placeholder
+
+    arguments = []
+    specialist_names = list(specialist_outputs.keys())
+
+    for agent_name in specialist_names:
+        # Build a debate prompt for this agent
+        own_output = specialist_outputs[agent_name]
+        peer_outputs = {
+            k: v for k, v in specialist_outputs.items()
+            if k != agent_name
+        }
+
+        peers_text = "\n".join(
+            f"  {name}: {finding}" for name, finding in peer_outputs.items()
+        )
+
+        prompt = (
+            f"You are {agent_name} in a clinical debate.\n"
+            f"Your previous finding: {own_output}\n\n"
+            f"Other specialists' findings:\n{peers_text}\n\n"
+        )
+
+        if research:
+            prompt += f"Latest research evidence:\n{research}\n\n"
+
+        prompt += (
+            "Critically evaluate the other specialists' recommendations. "
+            "Either revise your position based on new evidence, or defend "
+            "your recommendation with specific citations. "
+            "Be concise (2-3 sentences)."
+        )
+
+        try:
+            result = llm(prompt, max_tokens=512)
+            if isinstance(result, dict):
+                text = result["choices"][0]["text"]
+            else:
+                text = str(result)
+            arguments.append(f"{agent_name}: {text}")
+        except Exception as e:
+            logger.error(f"Debate failed for {agent_name}: {e}")
+            arguments.append(f"{agent_name}: Unable to participate in debate — {e}")
+
+    return arguments
 
 
 # ---------------------------------------------------------------------------

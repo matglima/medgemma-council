@@ -103,17 +103,29 @@ class ResearchAgent(BaseAgent):
         Summarize retrieved articles using the LLM.
         Isolated for mocking in tests.
 
-        In production, feeds the articles to the LLM with instructions
-        to summarize key findings and provide PMID citations.
+        Feeds the articles to the LLM with instructions to summarize
+        key findings and provide PMID citations.
         """
         if not articles:
             return "No relevant articles found in PubMed."
 
         formatted = self.pubmed_tool.format_results(articles)
 
-        # In production, the LLM would generate a clinical summary:
-        # prompt = f"{self.system_prompt}\n\nSummarize these findings:\n{formatted}"
-        # result = self.llm(prompt)
-        # return result["choices"][0]["text"]
+        # Use the LLM to generate a clinical summary
+        prompt = (
+            f"{self.system_prompt}\n\n"
+            f"Summarize the following PubMed articles for clinical decision-making. "
+            f"Focus on: study design, key findings, and clinical implications. "
+            f"Always include PMID citations.\n\n"
+            f"{formatted}\n\n"
+            f"Provide a concise evidence summary (3-5 sentences) with PMID references."
+        )
 
-        return formatted
+        try:
+            result = self.llm(prompt, max_tokens=1024)
+            if isinstance(result, dict):
+                return result["choices"][0]["text"]
+            return str(result)
+        except Exception:
+            # Fallback to raw formatted results if LLM fails
+            return formatted
