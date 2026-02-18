@@ -1,6 +1,6 @@
 """
 Tests for Specialist Agents (Cardiology, Oncology, Pediatrics,
-Psychiatry, EmergencyMedicine, Dermatology).
+Psychiatry, EmergencyMedicine, Dermatology, Neurology, Endocrinology).
 
 TDD: Written BEFORE src/agents/specialists.py.
 Per CLAUDE.md: Clinical Agents must cite specific guidelines.
@@ -361,3 +361,131 @@ class TestDermatologyAgent:
         agent = DermatologyAgent(llm=mock_llm)
         assert hasattr(agent, "supports_dermoscopy")
         assert agent.supports_dermoscopy is True
+
+
+class TestNeurologyAgent:
+    """Tests for the NeurologyAgent specialist."""
+
+    def test_inherits_base_agent(self):
+        """NeurologyAgent must inherit from BaseAgent."""
+        from agents.specialists import NeurologyAgent
+        from agents.base import BaseAgent
+
+        assert issubclass(NeurologyAgent, BaseAgent)
+
+    def test_name_property(self, mock_llm):
+        """NeurologyAgent.name must return 'NeurologyAgent'."""
+        from agents.specialists import NeurologyAgent
+
+        agent = NeurologyAgent(llm=mock_llm)
+        assert agent.name == "NeurologyAgent"
+
+    def test_analyze_returns_output(self, mock_llm):
+        """analyze() must return agent_outputs with neurology findings."""
+        from agents.specialists import NeurologyAgent
+
+        agent = NeurologyAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"age": 62, "chief_complaint": "acute onset left-sided weakness"},
+            "medical_images": [],
+            "agent_outputs": {},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch.object(agent, "_run_inference", return_value="Acute ischemic stroke suspected. tPA within window. (AHA/ASA Stroke Guidelines 2019)"):
+            result = agent.analyze(state)
+
+        assert "agent_outputs" in result
+        assert "NeurologyAgent" in result["agent_outputs"]
+
+    def test_has_system_prompt_with_persona(self, mock_llm):
+        """NeurologyAgent should have a neurology-specific system prompt."""
+        from agents.specialists import NeurologyAgent
+
+        agent = NeurologyAgent(llm=mock_llm)
+        assert "neurolog" in agent.system_prompt.lower()
+
+    def test_uses_rag_tool(self, mock_llm):
+        """NeurologyAgent should have a RAG tool for guideline retrieval."""
+        from agents.specialists import NeurologyAgent
+
+        agent = NeurologyAgent(llm=mock_llm)
+        assert hasattr(agent, "rag_tool")
+
+    def test_has_stroke_awareness_flag(self, mock_llm):
+        """NeurologyAgent must have stroke pathway awareness flag."""
+        from agents.specialists import NeurologyAgent
+
+        agent = NeurologyAgent(llm=mock_llm)
+        assert hasattr(agent, "enforce_stroke_protocol")
+        assert agent.enforce_stroke_protocol is True
+
+
+class TestEndocrinologyAgent:
+    """Tests for the EndocrinologyAgent specialist."""
+
+    def test_inherits_base_agent(self):
+        """EndocrinologyAgent must inherit from BaseAgent."""
+        from agents.specialists import EndocrinologyAgent
+        from agents.base import BaseAgent
+
+        assert issubclass(EndocrinologyAgent, BaseAgent)
+
+    def test_name_property(self, mock_llm):
+        """EndocrinologyAgent.name must return 'EndocrinologyAgent'."""
+        from agents.specialists import EndocrinologyAgent
+
+        agent = EndocrinologyAgent(llm=mock_llm)
+        assert agent.name == "EndocrinologyAgent"
+
+    def test_analyze_returns_output(self, mock_llm):
+        """analyze() must return agent_outputs with endocrinology findings."""
+        from agents.specialists import EndocrinologyAgent
+
+        agent = EndocrinologyAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"age": 52, "chief_complaint": "uncontrolled type 2 diabetes with HbA1c 10.2%"},
+            "medical_images": [],
+            "agent_outputs": {},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch.object(agent, "_run_inference", return_value="Intensify insulin regimen. Consider GLP-1 RA. (ADA Standards of Care 2025)"):
+            result = agent.analyze(state)
+
+        assert "agent_outputs" in result
+        assert "EndocrinologyAgent" in result["agent_outputs"]
+
+    def test_has_system_prompt_with_persona(self, mock_llm):
+        """EndocrinologyAgent should have an endocrinology-specific system prompt."""
+        from agents.specialists import EndocrinologyAgent
+
+        agent = EndocrinologyAgent(llm=mock_llm)
+        assert "endocrinolog" in agent.system_prompt.lower()
+
+    def test_uses_rag_tool(self, mock_llm):
+        """EndocrinologyAgent should have a RAG tool for guideline retrieval."""
+        from agents.specialists import EndocrinologyAgent
+
+        agent = EndocrinologyAgent(llm=mock_llm)
+        assert hasattr(agent, "rag_tool")
+
+    def test_has_diabetes_management_flag(self, mock_llm):
+        """EndocrinologyAgent must have diabetes management protocol flag."""
+        from agents.specialists import EndocrinologyAgent
+
+        agent = EndocrinologyAgent(llm=mock_llm)
+        assert hasattr(agent, "enforce_diabetes_protocol")
+        assert agent.enforce_diabetes_protocol is True

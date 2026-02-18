@@ -116,7 +116,8 @@ class SupervisorAgent(BaseAgent):
 
         In production, the LLM analyzes patient_context to select from:
         CardiologyAgent, OncologyAgent, PediatricsAgent, RadiologyAgent,
-        PsychiatryAgent, EmergencyMedicineAgent, DermatologyAgent.
+        PsychiatryAgent, EmergencyMedicineAgent, DermatologyAgent,
+        NeurologyAgent, EndocrinologyAgent.
         """
         patient_context = state.get("patient_context", {})
         images = state.get("medical_images", [])
@@ -131,7 +132,8 @@ class SupervisorAgent(BaseAgent):
             f"  Medications: {patient_context.get('medications', [])}\n"
             f"  Images available: {len(images)}\n\n"
             f"Available specialists: CardiologyAgent, OncologyAgent, PediatricsAgent, "
-            f"RadiologyAgent, PsychiatryAgent, EmergencyMedicineAgent, DermatologyAgent.\n\n"
+            f"RadiologyAgent, PsychiatryAgent, EmergencyMedicineAgent, DermatologyAgent, "
+            f"NeurologyAgent, EndocrinologyAgent.\n\n"
             f"Return ONLY a comma-separated list of specialist names to activate "
             f"(e.g., 'CardiologyAgent, RadiologyAgent'). Do not include explanations."
         )
@@ -146,7 +148,7 @@ class SupervisorAgent(BaseAgent):
         all_specialists = [
             "CardiologyAgent", "OncologyAgent", "PediatricsAgent",
             "RadiologyAgent", "PsychiatryAgent", "EmergencyMedicineAgent",
-            "DermatologyAgent",
+            "DermatologyAgent", "NeurologyAgent", "EndocrinologyAgent",
         ]
         activated = []
         for name in all_specialists:

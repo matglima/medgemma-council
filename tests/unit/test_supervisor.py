@@ -173,6 +173,54 @@ class TestSupervisorAgent:
 
         assert "DermatologyAgent" in specialists
 
+    def test_routing_seizure_activates_neurology(self, mock_llm):
+        """Seizure presentation should activate NeurologyAgent."""
+        from agents.supervisor import SupervisorAgent
+
+        agent = SupervisorAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"age": 30, "chief_complaint": "recurrent seizures and headaches"},
+            "medical_images": [],
+            "agent_outputs": {},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch.object(agent, "_determine_specialists") as mock_det:
+            mock_det.return_value = ["NeurologyAgent", "RadiologyAgent"]
+            specialists = agent.route(state)
+
+        assert "NeurologyAgent" in specialists
+
+    def test_routing_diabetes_activates_endocrinology(self, mock_llm):
+        """Diabetes/thyroid presentation should activate EndocrinologyAgent."""
+        from agents.supervisor import SupervisorAgent
+
+        agent = SupervisorAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"age": 48, "chief_complaint": "uncontrolled diabetes and thyroid nodule"},
+            "medical_images": [],
+            "agent_outputs": {},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch.object(agent, "_determine_specialists") as mock_det:
+            mock_det.return_value = ["EndocrinologyAgent"]
+            specialists = agent.route(state)
+
+        assert "EndocrinologyAgent" in specialists
+
     def test_detect_conflict_finds_contradictions(self, mock_llm):
         """detect_conflict() should flag when agents contradict each other."""
         from agents.supervisor import SupervisorAgent

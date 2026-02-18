@@ -27,6 +27,8 @@ from agents.specialists import (
     PsychiatryAgent,
     EmergencyMedicineAgent,
     DermatologyAgent,
+    NeurologyAgent,
+    EndocrinologyAgent,
 )
 from agents.radiology import RadiologyAgent
 
@@ -123,6 +125,8 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
         "PsychiatryAgent": PsychiatryAgent,
         "EmergencyMedicineAgent": EmergencyMedicineAgent,
         "DermatologyAgent": DermatologyAgent,
+        "NeurologyAgent": NeurologyAgent,
+        "EndocrinologyAgent": EndocrinologyAgent,
         "RadiologyAgent": RadiologyAgent,
     }
 

@@ -1,6 +1,6 @@
 """
 Specialist Agents: Cardiology, Oncology, Pediatrics,
-Psychiatry, EmergencyMedicine, Dermatology.
+Psychiatry, EmergencyMedicine, Dermatology, Neurology, Endocrinology.
 
 RAG-enabled clinical specialists grounded in authoritative guidelines.
 Each agent has a distinct persona, system prompt, and knowledge base.
@@ -300,3 +300,72 @@ class DermatologyAgent(_SpecialistAgent):
     @property
     def name(self) -> str:
         return "DermatologyAgent"
+
+
+class NeurologyAgent(_SpecialistAgent):
+    """
+    Board-Certified Neurologist agent.
+
+    Knowledge base: AAN Guidelines, AHA/ASA Stroke Guidelines, ILAE Epilepsy Guidelines.
+    Competencies: Stroke pathway management (tPA/thrombectomy windows),
+    seizure classification and management, MS disease-modifying therapies,
+    Parkinson's staging (Hoehn & Yahr), headache classification (ICHD-3).
+    """
+
+    def __init__(self, llm: Any, vector_store_path: str = _DEFAULT_VECTOR_STORE) -> None:
+        system_prompt = (
+            "You are a board-certified neurologist specializing in cerebrovascular disease, "
+            "epilepsy, movement disorders, and neuroimmunology. "
+            "For stroke cases, apply the AHA/ASA Stroke Guidelines 2019 for acute management "
+            "including tPA eligibility (within 4.5-hour window) and mechanical thrombectomy "
+            "(within 24-hour window for large vessel occlusion). "
+            "For seizure management, follow ILAE 2017 classification and AAN/AES treatment "
+            "guidelines. For multiple sclerosis, reference AAN Disease-Modifying Therapy "
+            "guidelines. For Parkinson's disease, use MDS Clinical Diagnostic Criteria "
+            "and AAN Quality Measures. "
+            "Always cite the specific guideline and evidence level "
+            "(e.g., 'AHA/ASA Stroke Guidelines 2019, Class I, Level A'). "
+            "Prioritize time-sensitive interventions for acute neurological emergencies."
+        )
+        super().__init__(llm=llm, system_prompt=system_prompt, vector_store_path=vector_store_path)
+        self.enforce_stroke_protocol: bool = True
+
+    @property
+    def name(self) -> str:
+        return "NeurologyAgent"
+
+
+class EndocrinologyAgent(_SpecialistAgent):
+    """
+    Board-Certified Endocrinologist agent.
+
+    Knowledge base: ADA Standards of Care, ATA Thyroid Guidelines,
+    Endocrine Society Clinical Practice Guidelines.
+    Competencies: Diabetes management (HbA1c targets, insulin titration,
+    GLP-1 RA/SGLT2i selection), thyroid disorder workup,
+    adrenal insufficiency, metabolic bone disease,
+    pituitary/hypothalamic disorders.
+    """
+
+    def __init__(self, llm: Any, vector_store_path: str = _DEFAULT_VECTOR_STORE) -> None:
+        system_prompt = (
+            "You are a board-certified endocrinologist specializing in diabetes management, "
+            "thyroid disorders, and metabolic diseases. "
+            "For diabetes, follow the ADA Standards of Care 2025 for glycemic targets, "
+            "medication selection algorithms (metformin first-line, GLP-1 RA or SGLT2i for "
+            "cardiovascular/renal benefit), and insulin initiation/titration protocols. "
+            "For thyroid disorders, apply ATA 2015 Guidelines for thyroid nodules and "
+            "differentiated thyroid cancer, and ATA/AACE 2012 Hypothyroidism Guidelines. "
+            "For adrenal disorders, reference the Endocrine Society Clinical Practice "
+            "Guidelines for adrenal insufficiency and Cushing's syndrome. "
+            "Always cite the specific guideline and recommendation strength "
+            "(e.g., 'ADA Standards of Care 2025, Grade A'). "
+            "Monitor HbA1c trends, adjust regimens based on time-in-range data, "
+            "and screen for microvascular and macrovascular complications."
+        )
+        super().__init__(llm=llm, system_prompt=system_prompt, vector_store_path=vector_store_path)
+        self.enforce_diabetes_protocol: bool = True
+
+    @property
+    def name(self) -> str:
+        return "EndocrinologyAgent"
