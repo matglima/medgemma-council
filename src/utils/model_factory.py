@@ -2,21 +2,24 @@
 ModelFactory: Centralized model creation with feature flag.
 
 Reads MEDGEMMA_USE_REAL_MODELS env var to decide whether to return
-real quantized models or MagicMock instances for testing/development.
+MockModelWrapper instances or real wrapped models for inference.
 
 Usage:
     factory = ModelFactory()
-    text_model = factory.create_text_model()  # Returns mock by default
+    text_model = factory.create_text_model()  # Returns MockModelWrapper by default
     vision_model = factory.create_vision_model()
 
     # To use real models (requires GPU + model weights):
     # export MEDGEMMA_USE_REAL_MODELS=true
+
+All returned models conform to the agent callable interface:
+    Text:   result = model(prompt, max_tokens=N) -> {"choices": [{"text": "..."}]}
+    Vision: result = model(images=..., prompt=...) -> [{"generated_text": "..."}]
 """
 
 import logging
 import os
 from typing import Any
-from unittest.mock import MagicMock
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +33,8 @@ class ModelFactory:
     Factory for creating text and vision models.
 
     Controlled by MEDGEMMA_USE_REAL_MODELS env var:
-    - False (default): Returns MagicMock instances for testing.
-    - True: Loads real quantized models via transformers + bitsandbytes.
+    - False (default): Returns MockModelWrapper instances for testing.
+    - True: Loads real quantized models wrapped in TextModelWrapper/VisionModelWrapper.
     """
 
     def __init__(self) -> None:
@@ -50,18 +53,20 @@ class ModelFactory:
         """
         Create a text model (MedGemma 27B).
 
-        In mock mode: returns a callable MagicMock.
-        In real mode: loads with 4-bit NF4 quantization via transformers.
+        In mock mode: returns a MockModelWrapper(mode="text").
+        In real mode: loads with 4-bit NF4 quantization, wraps in TextModelWrapper.
 
         Args:
             model_id: HuggingFace model ID.
 
         Returns:
-            A model instance (real or mock).
+            A callable model wrapper conforming to the agent interface.
         """
         if not self.use_real_models:
+            from utils.model_wrappers import MockModelWrapper
+
             logger.info(f"Creating mock text model for '{model_id}'")
-            return MagicMock()
+            return MockModelWrapper(mode="text")
 
         logger.info(f"Loading real text model '{model_id}' with quantization")
         return self._load_real_text_model(model_id)
@@ -73,33 +78,38 @@ class ModelFactory:
         """
         Create a vision model (MedGemma 4B multimodal).
 
-        In mock mode: returns a callable MagicMock.
-        In real mode: loads with bfloat16 on single GPU.
+        In mock mode: returns a MockModelWrapper(mode="vision").
+        In real mode: loads with bfloat16, wraps in VisionModelWrapper.
 
         Args:
             model_id: HuggingFace model ID.
 
         Returns:
-            A model/pipeline instance (real or mock).
+            A callable model wrapper conforming to the agent interface.
         """
         if not self.use_real_models:
+            from utils.model_wrappers import MockModelWrapper
+
             logger.info(f"Creating mock vision model for '{model_id}'")
-            return MagicMock()
+            return MockModelWrapper(mode="vision")
 
         logger.info(f"Loading real vision model '{model_id}' with bfloat16")
         return self._load_real_vision_model(model_id)
 
     def _load_real_text_model(self, model_id: str) -> Any:
         """
-        Internal: Load the real 27B text model with quantization.
+        Internal: Load the real 27B text model with quantization and wrap it.
         Isolated for mocking in tests.
 
         Uses transformers AutoModelForCausalLM with BitsAndBytesConfig
         for 4-bit NF4 quantization and device_map="auto" for tensor
         parallelism across 2xT4 GPUs.
+
+        Returns a TextModelWrapper for agent-compatible calling convention.
         """
         from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
+        from utils.model_wrappers import TextModelWrapper
         from utils.quantization import QuantizationConfig, get_model_kwargs
 
         qconfig = QuantizationConfig()
@@ -111,19 +121,23 @@ class ModelFactory:
             **model_kwargs,
         )
 
-        logger.info(f"Loaded text model '{model_id}' successfully")
-        return model
+        logger.info(f"Loaded text model '{model_id}' successfully, wrapping")
+        return TextModelWrapper(model=model, tokenizer=tokenizer)
 
     def _load_real_vision_model(self, model_id: str) -> Any:
         """
-        Internal: Load the real 4B vision model with bfloat16.
+        Internal: Load the real 4B vision model with bfloat16 and wrap it.
         Isolated for mocking in tests.
 
         Uses transformers pipeline("image-text-to-text") with
         torch_dtype=bfloat16 on a single T4 GPU.
+
+        Returns a VisionModelWrapper for agent-compatible calling convention.
         """
         import torch
         from transformers import pipeline  # type: ignore
+
+        from utils.model_wrappers import VisionModelWrapper
 
         pipe = pipeline(
             "image-text-to-text",
@@ -132,5 +146,5 @@ class ModelFactory:
             device_map="auto",
         )
 
-        logger.info(f"Loaded vision model '{model_id}' successfully")
-        return pipe
+        logger.info(f"Loaded vision model '{model_id}' successfully, wrapping")
+        return VisionModelWrapper(pipeline=pipe)
