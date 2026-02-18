@@ -16,6 +16,8 @@ Graph topology:
 """
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -113,10 +115,44 @@ def _make_researcher() -> ResearchAgent:
 # ---------------------------------------------------------------------------
 
 
+def _run_single_specialist(
+    agent_name: str,
+    agent_cls: type,
+    llm: Any,
+    state: Dict[str, Any],
+) -> Dict[str, str]:
+    """
+    Run a single specialist agent and return its outputs.
+
+    Isolated as a top-level function so it can be submitted to
+    ThreadPoolExecutor (lambdas and nested functions are fragile
+    across pickling boundaries).
+
+    Returns:
+        Dict mapping agent name to output string (or error message).
+    """
+    try:
+        agent = agent_cls(llm=llm)
+        result = agent.analyze(state)
+        agent_out = result.get("agent_outputs", {})
+        return agent_out
+    except Exception as e:
+        logger.error(f"Agent {agent_name} failed: {e}")
+        return {agent_name: f"Error: {e}"}
+
+
 def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
     """
-    Run activated specialist agents and collect their outputs.
+    Run activated specialist agents **in parallel** and collect their outputs.
     Isolated for mocking in tests.
+
+    Uses ``concurrent.futures.ThreadPoolExecutor`` so that specialist LLM
+    calls (which are I/O-bound when hitting a remote model or waiting for
+    GPU batch slots) overlap instead of running sequentially.
+
+    Configuration:
+        COUNCIL_MAX_WORKERS (env var): Override the default thread-pool size.
+            Defaults to the number of activated specialists.
 
     Parses the supervisor's routing output to determine which specialists
     to instantiate and run.
@@ -155,21 +191,31 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
 
     llm = factory.create_text_model()
 
-    outputs: Dict[str, str] = {}
-    for agent_name in activated:
-        agent_cls = agent_registry[agent_name]
-        if agent_name == "RadiologyAgent":
-            agent = agent_cls(llm=llm)
-        else:
-            agent = agent_cls(llm=llm)
+    # Determine thread-pool size
+    env_workers = os.environ.get("COUNCIL_MAX_WORKERS")
+    max_workers = int(env_workers) if env_workers else len(activated)
 
-        try:
-            result = agent.analyze(state)
-            agent_out = result.get("agent_outputs", {})
-            outputs.update(agent_out)
-        except Exception as e:
-            logger.error(f"Agent {agent_name} failed: {e}")
-            outputs[agent_name] = f"Error: {e}"
+    outputs: Dict[str, str] = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit each specialist as a parallel task
+        future_to_name = {}
+        for agent_name in activated:
+            agent_cls = agent_registry[agent_name]
+            future = executor.submit(
+                _run_single_specialist, agent_name, agent_cls, llm, state
+            )
+            future_to_name[future] = agent_name
+
+        # Collect results as they complete
+        for future in as_completed(future_to_name):
+            agent_name = future_to_name[future]
+            try:
+                result = future.result()
+                outputs.update(result)
+            except Exception as e:
+                logger.error(f"Agent {agent_name} future failed: {e}")
+                outputs[agent_name] = f"Error: {e}"
 
     return outputs
 
