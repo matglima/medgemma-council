@@ -1,7 +1,7 @@
 # MedGemma-Council
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-165%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-367%20passing-brightgreen.svg)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-purple.svg)](https://github.com/langchain-ai/langgraph)
 
@@ -29,43 +29,52 @@
                                ▼
                       ┌──────────────────┐
                       │   Specialists    │
-                      │ Cardiology │ Onc │
-                      │ Peds │ Rad │ EM  │
-                      │ Psych │ Derm    │
+                      │  (Parallel via   │
+                      │ ThreadPoolExec.) │
                       └────────┬─────────┘
                                │
                                ▼
                       ┌──────────────────┐
-                      │ Conflict Check   │◄─────────────────┐
-                      └────────┬─────────┘                  │
-                       ┌───────┴───────┐                    │
-                  No Conflict     Conflict &                │
-                       │          iter < 3                   │
-                       ▼               │                    │
-                ┌────────────┐         ▼                    │
-                │  Synthesis │   ┌───────────┐              │
-                │ (Final Plan│   │ Research  │              │
-                │   + Judge) │   │ (PubMed)  │              │
-                └────────────┘   └─────┬─────┘              │
-                       │               ▼                    │
-                       ▼         ┌───────────┐              │
-                      END        │  Debate   │──────────────┘
-                                 └───────────┘
+                      │  Safety Check    │
+                      │ (Red Flag Scan)  │
+                      └────────┬─────────┘
+                       ┌───────┴────────┐
+                  Red Flag           No Flag
+                       │                │
+                       ▼                ▼
+              ┌────────────────┐ ┌──────────────────┐
+              │   Emergency    │ │ Conflict Check   │◄────────────┐
+              │  Synthesis     │ └────────┬─────────┘             │
+              │ (Override Plan)│  ┌───────┴───────┐               │
+              └───────┬────────┘ No Conflict  Conflict &          │
+                      │              │        iter < 3            │
+                      ▼              ▼             │              │
+                     END      ┌────────────┐      ▼              │
+                              │  Synthesis │ ┌───────────┐       │
+                              │ (Final Plan│ │ Research  │       │
+                              │   + Judge) │ │ (PubMed)  │       │
+                              └─────┬──────┘ └─────┬─────┘       │
+                                    │              ▼              │
+                                    ▼        ┌───────────┐       │
+                                   END       │  Debate   │───────┘
+                                             └───────────┘
 ```
 
 ### Council Topology
 
-The system implements a **7-node LangGraph StateGraph** with a conditional debate loop:
+The system implements a **9-node LangGraph StateGraph** with a conditional debate loop and safety override:
 
-1. **Ingestion** — Validates patient state, resets counters
-2. **Supervisor Route** — Analyzes case and selects relevant specialists
-3. **Specialist** — Runs activated specialist agents in parallel
-4. **Conflict Check** — Detects contradictions between specialist outputs
-5. **Research** — Fetches PubMed literature to resolve conflicts (conditional)
-6. **Debate** — Specialists critique each other using evidence (conditional)
-7. **Synthesis** — Produces final clinical management plan
+1. **Ingestion** -- Validates patient state, resets counters
+2. **Supervisor Route** -- Analyzes case and selects relevant specialists
+3. **Specialist** -- Runs activated specialist agents in parallel via `ThreadPoolExecutor`
+4. **Safety Check** -- Scans all specialist outputs for red flags (suicide risk, sepsis, cardiac arrest, etc.)
+5. **Emergency Synthesis** -- Produces emergency override plan when red flags detected (terminates graph)
+6. **Conflict Check** -- Detects contradictions between specialist outputs
+7. **Research** -- Fetches PubMed literature to resolve conflicts (conditional)
+8. **Debate** -- Specialists critique each other using evidence (conditional)
+9. **Synthesis** -- Produces final clinical management plan
 
-The debate loop (steps 5-6) runs up to `MAX_DEBATE_ROUNDS=3` times before forcing synthesis.
+The debate loop (steps 7-8) runs up to `MAX_DEBATE_ROUNDS=3` times before forcing synthesis. The safety override (step 5) short-circuits the entire pipeline when life-threatening emergencies are detected.
 
 ---
 
@@ -81,16 +90,95 @@ The debate loop (steps 5-6) runs up to `MAX_DEBATE_ROUNDS=3` times before forcin
 | **PsychiatryAgent** | Psychiatry | APA, DSM-5-TR | PHQ-9/GAD-7, suicide risk (C-SSRS) |
 | **EmergencyMedicineAgent** | Emergency Medicine | ACLS, ATLS, EMTALA | Triage (ESI), trauma, sepsis bundles |
 | **DermatologyAgent** | Dermatology | AAD, BAD | Lesion morphology, dermoscopy, ABCDE criteria |
+| **NeurologyAgent** | Neurology | AAN, AHA/ASA | Stroke scales (NIHSS), seizure management |
+| **EndocrinologyAgent** | Endocrinology | ADA, Endocrine Society | Diabetes management, thyroid disorders |
 
 ---
 
 ## Safety Guardrails
 
-Every agent output passes through three safety layers:
+Every agent output passes through multiple safety layers:
 
-1. **Red Flag Scanner** — Detects 7 emergency patterns (suicide risk, sepsis, cardiac arrest, stroke, anaphylaxis, tension pneumothorax, status epilepticus). Triggers immediate emergency override.
-2. **PII Redaction** — Strips SSNs, phone numbers, emails, and MRNs before display.
-3. **Clinical Disclaimer** — Appended to all outputs.
+### Output-level Safety
+1. **Red Flag Scanner** -- Detects 7 emergency patterns (suicide risk, sepsis, cardiac arrest, stroke, anaphylaxis, tension pneumothorax, status epilepticus). Triggers immediate emergency override.
+2. **PII Redaction** -- Strips SSNs, phone numbers, emails, and MRNs before display.
+3. **Clinical Disclaimer** -- Appended to all outputs.
+
+### Graph-level Safety Override
+The `safety_check` node scans all specialist outputs after they run. If any red flag is detected, the graph immediately routes to `emergency_synthesis`, bypassing the normal debate/synthesis flow. This ensures life-threatening emergencies are never delayed by the deliberation process.
+
+---
+
+## Evaluation Harness
+
+### Clinical Benchmarks
+
+The evaluation harness supports three standard medical QA benchmarks:
+
+| Benchmark | Dataset | Size | Metric |
+|-----------|---------|------|--------|
+| **MedQA** | `GBaker/MedQA-USMLE-4-options` | 1.27k test | Accuracy |
+| **PubMedQA** | `qiaojin/PubMedQA` (pqa_labeled) | 1k | Accuracy |
+| **MedMCQA** | `openlifescienceai/medmcqa` | 194k (21 subjects) | Accuracy + per-specialty |
+
+MedGemma published baselines: MedQA 89.8%, MedMCQA 74.2%, PubMedQA 76.8%, MMLU Med 87.0%.
+
+```bash
+# Run evaluation via CLI
+python -m evaluation.runner --benchmark medqa --limit 100
+python -m evaluation.runner --benchmark medmcqa --specialty Cardiology --limit 50
+python -m evaluation.runner --benchmark pubmedqa --output results.json
+```
+
+### PMC-Patients Evaluation
+
+Patient case evaluation using the PMC-Patients dataset with retrieval metrics and LLM-as-Judge scoring:
+
+- **Dataset:** `zhengyun21/PMC-Patients` on HuggingFace
+- **Retrieval Metrics:** Mean Reciprocal Rank (MRR), NDCG@k
+- **LLM-as-Judge:** Automated clinical plan scoring (1-5 scale) for accuracy, completeness, safety, and evidence-based reasoning
+
+```python
+from evaluation.pmc_patients import load_pmc_patients, format_pmc_patient_prompt
+from evaluation.retrieval_metrics import compute_mrr, compute_ndcg
+from evaluation.llm_judge import LLMJudge, generate_judging_prompt
+
+# Load patient cases
+patients = load_pmc_patients(limit=100)
+prompt = format_pmc_patient_prompt(patients[0])
+
+# Evaluate retrieval quality
+mrr = compute_mrr(retrieval_results)
+ndcg = compute_ndcg(ranking_results, k=10)
+
+# LLM-as-Judge evaluation
+judge = LLMJudge(llm=my_llm)
+score = judge.evaluate_plan(patient_context, clinical_plan)
+batch_scores = judge.evaluate_batch(cases)
+```
+
+---
+
+## RAG Ingestion Pipeline
+
+Ingest clinical guideline documents (PDF, TXT, Markdown) into a ChromaDB vector store for retrieval-augmented generation:
+
+```bash
+# Ingest guidelines from a directory
+python scripts/ingest_guidelines.py \
+  --input-dir data/reference_docs/ \
+  --output-dir data/vector_store/ \
+  --chunk-size 512 \
+  --chunk-overlap 64 \
+  --collection guidelines
+
+# Custom collection name
+python scripts/ingest_guidelines.py \
+  --input-dir /path/to/guidelines/ \
+  --collection cardiology_guidelines
+```
+
+The pipeline uses sliding-window chunking with configurable overlap and attaches source metadata (filename, chunk index) to each chunk for citation tracing.
 
 ---
 
@@ -99,14 +187,17 @@ Every agent output passes through three safety layers:
 | Component | Technology |
 |-----------|-----------|
 | Orchestration | LangGraph (StateGraph) |
-| Text Inference | `llama-cpp-python` (MedGemma-27B Q4_K_M) |
-| Vision Inference | `transformers` (MedGemma 1.5 4B) |
+| Text Inference | `transformers` + `bitsandbytes` (4-bit NF4 quantization) |
+| Vision Inference | `transformers` (MedGemma 1.5 4B, bfloat16) |
+| Model Parallelism | `device_map="auto"` across 2xT4 GPUs via `accelerate` |
 | RAG | LlamaIndex + ChromaDB |
+| Guideline Ingestion | Custom chunker + ChromaDB upsert |
 | Literature Search | BioPython (`Bio.Entrez`) |
+| Evaluation | MedQA, PubMedQA, MedMCQA, PMC-Patients, LLM-as-Judge |
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock |
+| Testing | pytest + unittest.mock (367 tests) |
 
 ---
 
@@ -121,26 +212,48 @@ medgemma-council/
 │   │   ├── radiology.py         # RadiologyAgent (vision)
 │   │   ├── researcher.py        # ResearchAgent (PubMed)
 │   │   ├── specialists.py       # Cardiology, Oncology, Pediatrics,
-│   │   │                        # Psychiatry, EmergencyMedicine, Dermatology
+│   │   │                        # Psychiatry, EmergencyMedicine,
+│   │   │                        # Dermatology, Neurology, Endocrinology
 │   │   └── supervisor.py        # SupervisorAgent (router + judge)
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── bio_entrez.py        # PubMedTool
 │   │   ├── rag_tool.py          # RAGTool (ChromaDB)
-│   │   └── medasr.py            # MedASRTool (speech-to-text)
+│   │   ├── medasr.py            # MedASRTool (speech-to-text)
+│   │   └── ingestion.py         # GuidelineChunker + IngestionPipeline
 │   ├── utils/
 │   │   ├── __init__.py
 │   │   ├── safety.py            # Red flags, PII redaction, disclaimers
-│   │   └── model_loader.py      # VRAM management
-│   └── graph.py                 # LangGraph state machine + CouncilState
+│   │   ├── model_loader.py      # VRAM management + model registry
+│   │   ├── model_factory.py     # ModelFactory (mock/real mode switching)
+│   │   ├── model_wrappers.py    # TextModelWrapper, VisionModelWrapper,
+│   │   │                        # MockModelWrapper
+│   │   └── quantization.py      # BitsAndBytes 4-bit config, GPU detection
+│   ├── evaluation/
+│   │   ├── __init__.py
+│   │   ├── benchmarks.py        # MedQA, PubMedQA, MedMCQA loaders
+│   │   ├── evaluator.py         # CouncilEvaluator (single + batch)
+│   │   ├── metrics.py           # Accuracy, per-specialty, CI, reports
+│   │   ├── runner.py            # CLI evaluation runner
+│   │   ├── pmc_patients.py      # PMC-Patients dataset loader
+│   │   ├── retrieval_metrics.py # MRR, NDCG@k
+│   │   └── llm_judge.py         # LLM-as-Judge evaluator
+│   └── graph.py                 # LangGraph 9-node state machine
+├── scripts/
+│   ├── __init__.py
+│   └── ingest_guidelines.py     # CLI for guideline ingestion
 ├── tests/
 │   ├── conftest.py              # Global mock fixtures
-│   ├── unit/                    # Unit tests for all modules
-│   └── integration/             # End-to-end graph flow tests
+│   ├── unit/                    # 26 unit test modules
+│   └── integration/             # Graph flow + safety override tests
+├── data/
+│   ├── reference_docs/          # Guideline PDFs/TXT (gitignored)
+│   ├── vector_store/            # ChromaDB index (gitignored)
+│   └── uploads/                 # Uploaded medical images
 ├── app.py                       # Streamlit UI
 ├── app_gradio.py                # Gradio UI
-├── council_cli.py               # CLI interface for Kaggle notebooks
-├── example_kaggle_notebook.ipynb # Example Kaggle notebook
+├── council_cli.py               # CLI interface
+├── example_kaggle_notebook.ipynb # Complete Kaggle walkthrough
 ├── setup.py                     # Package configuration
 ├── requirements.txt             # Dependencies
 ├── Dockerfile                   # Container build
@@ -168,7 +281,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all 367 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -278,6 +391,8 @@ The shared state flowing through all graph nodes:
 | `conflict_detected` | `bool` | Whether specialists disagree |
 | `iteration_count` | `int` | Current debate round number |
 | `final_plan` | `str` | Synthesized clinical management plan |
+| `red_flag_detected` | `bool` | Whether a safety red flag was found |
+| `emergency_override` | `str` | Emergency plan text (when red flag triggers) |
 
 ### Key Functions
 
@@ -295,12 +410,31 @@ flags = scan_for_red_flags("Patient in cardiac arrest")
 clean_text = redact_pii("SSN: 123-45-6789")
 output = add_disclaimer("Clinical findings...")
 
-# Model management
-from utils.model_loader import ModelLoader
+# Model management (with 4-bit quantization)
+from utils.model_factory import ModelFactory
+from utils.quantization import get_model_kwargs
 
-loader = ModelLoader()
-loader.load_text_model("medgemma-27b", "/path/to/model.gguf", n_gpu_layers=40)
-loader.swap_model("medgemma-27b", "medgemma-4b", "/path/to/vision", model_type="vision")
+factory = ModelFactory()  # defaults to mock mode
+text_model = factory.create_text_model()
+vision_model = factory.create_vision_model()
+
+# For real models on Kaggle (set MEDGEMMA_USE_REAL_MODELS=true)
+kwargs = get_model_kwargs()  # auto-detects GPUs, applies 4-bit NF4 config
+
+# Evaluation
+from evaluation.evaluator import CouncilEvaluator
+from evaluation.llm_judge import LLMJudge
+
+evaluator = CouncilEvaluator(graph=graph)
+result = evaluator.evaluate_single(question, answer, prompt)
+judge = LLMJudge(llm=text_model)
+score = judge.evaluate_plan(patient_context, clinical_plan)
+
+# Guideline ingestion
+from tools.ingestion import GuidelineChunker, IngestionPipeline
+
+pipeline = IngestionPipeline(persist_directory="data/vector_store/")
+pipeline.ingest_directory("data/reference_docs/")
 ```
 
 ---
@@ -309,16 +443,37 @@ loader.swap_model("medgemma-27b", "medgemma-4b", "/path/to/vision", model_type="
 
 ### Kaggle (Dual T4 GPUs)
 
-| Model | VRAM | GPU |
-|-------|------|-----|
-| MedGemma-27B (Q4_K_M) | ~14 GB | T4 #1 |
-| MedGemma 1.5 4B | ~8 GB | T4 #2 |
+| Model | Format | VRAM | Placement |
+|-------|--------|------|-----------|
+| MedGemma-27B | 4-bit NF4 via `bitsandbytes` | ~13.5 GB | Split across T4 #1 + T4 #2 (`device_map="auto"`) |
+| MedGemma 1.5 4B | bfloat16 | ~8 GB | Single T4, loaded on-demand |
 
-The `ModelLoader` class manages dynamic model swapping to stay within 16 GB VRAM per GPU. Models are loaded on-demand and unloaded after use.
+Quantization config:
+```python
+BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+)
+# Memory budget: max_memory={0: "14GiB", 1: "14GiB"}
+```
+
+The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_USE_REAL_MODELS` env var). In mock mode (default), no GPU is needed. In real mode, models are loaded with automatic tensor parallelism via `accelerate`.
 
 ### Local Development
 
-Tests run without any GPU — all model calls are mocked. The full test suite completes in < 1 second.
+Tests run without any GPU -- all model calls are mocked. The full test suite (367 tests) completes in < 2 seconds.
+
+---
+
+## Parallel Specialist Execution
+
+Specialist agents run concurrently via `ThreadPoolExecutor` for faster case analysis. Each specialist runs in its own thread with fault isolation -- if one specialist fails, the others still complete.
+
+Configuration:
+- Default `max_workers` = number of activated specialists
+- Override via `COUNCIL_MAX_WORKERS` environment variable
+- Individual specialist timeouts produce error entries (not crashes)
 
 ---
 
