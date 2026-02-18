@@ -28,6 +28,8 @@ COPY src/ src/
 COPY tests/ tests/
 COPY data/ data/
 COPY app.py .
+COPY app_gradio.py .
+COPY council_cli.py .
 COPY conftest.py .
 COPY README.md .
 
@@ -39,3 +41,4 @@ CMD ["pytest", "tests/", "-v"]
 
 # Instructions for running the app:
 # docker run -p 8501:8501 medgemma-council streamlit run app.py
+# docker run -p 7860:7860 medgemma-council python app_gradio.py

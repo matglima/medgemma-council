@@ -4,6 +4,7 @@ langchain-core>=1.0.0
 
 # UI
 streamlit>=1.30.0
+gradio>=4.0.0
 
 # Inference
 torch>=2.1.0
