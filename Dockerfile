@@ -28,6 +28,7 @@ COPY src/ src/
 COPY tests/ tests/
 COPY data/ data/
 COPY app.py .
+COPY conftest.py .
 COPY README.md .
 
 # Install the project in editable mode
