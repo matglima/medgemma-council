@@ -1,5 +1,6 @@
 """
-Specialist Agents: Cardiology, Oncology, Pediatrics.
+Specialist Agents: Cardiology, Oncology, Pediatrics,
+Psychiatry, EmergencyMedicine, Dermatology.
 
 RAG-enabled clinical specialists grounded in authoritative guidelines.
 Each agent has a distinct persona, system prompt, and knowledge base.
@@ -154,3 +155,93 @@ class PediatricsAgent(_SpecialistAgent):
     @property
     def name(self) -> str:
         return "PediatricsAgent"
+
+
+class PsychiatryAgent(_SpecialistAgent):
+    """
+    Board-Certified Psychiatrist agent.
+
+    Knowledge base: APA Practice Guidelines, DSM-5-TR.
+    Competencies: Mood disorder assessment, PHQ-9/GAD-7 scoring,
+    suicide risk assessment (C-SSRS), psychopharmacology,
+    therapy modality selection.
+    """
+
+    def __init__(self, llm: Any, vector_store_path: str = _DEFAULT_VECTOR_STORE) -> None:
+        system_prompt = (
+            "You are a board-certified psychiatrist specializing in mood disorders, "
+            "anxiety disorders, and psychopharmacology. Your assessments must include "
+            "standardized screening tools (PHQ-9, GAD-7, C-SSRS). "
+            "Ground your recommendations in APA Practice Guidelines and DSM-5-TR criteria. "
+            "Always perform a suicide risk assessment using the Columbia Suicide Severity "
+            "Rating Scale (C-SSRS) when risk factors are present. "
+            "Cite the specific guideline (e.g., 'APA Practice Guidelines 2023, "
+            "DSM-5-TR Diagnostic Criteria')."
+        )
+        super().__init__(llm=llm, system_prompt=system_prompt, vector_store_path=vector_store_path)
+        self.enforce_suicide_screening: bool = True
+
+    @property
+    def name(self) -> str:
+        return "PsychiatryAgent"
+
+
+class EmergencyMedicineAgent(_SpecialistAgent):
+    """
+    Emergency Medicine Physician agent.
+
+    Knowledge base: ACLS, ATLS, EMTALA, Surviving Sepsis Campaign.
+    Competencies: ESI triage, trauma assessment (ABCDE), sepsis bundles,
+    rapid stabilization, disposition decision-making.
+    """
+
+    def __init__(self, llm: Any, vector_store_path: str = _DEFAULT_VECTOR_STORE) -> None:
+        system_prompt = (
+            "You are a board-certified emergency medicine physician specializing in "
+            "acute stabilization, trauma, and critical care triage. "
+            "Apply the Emergency Severity Index (ESI) for triage classification. "
+            "Follow ACLS/ATLS protocols for resuscitation and trauma management. "
+            "Adhere to Surviving Sepsis Campaign bundles for sepsis cases. "
+            "Always consider EMTALA obligations for patient stabilization. "
+            "Ground your recommendations in ACLS 2020, ATLS 10th Edition, and "
+            "Surviving Sepsis Campaign 2021 guidelines. "
+            "Cite the specific guideline (e.g., 'ACLS 2020 Guidelines, "
+            "Surviving Sepsis Campaign 2021')."
+        )
+        super().__init__(llm=llm, system_prompt=system_prompt, vector_store_path=vector_store_path)
+        self.enforce_triage_protocol: bool = True
+
+    @property
+    def name(self) -> str:
+        return "EmergencyMedicineAgent"
+
+
+class DermatologyAgent(_SpecialistAgent):
+    """
+    Board-Certified Dermatologist agent.
+
+    Knowledge base: AAD Guidelines, BAD Guidelines, Fitzpatrick Skin Type.
+    Competencies: Lesion morphology analysis, dermoscopy interpretation,
+    ABCDE melanoma criteria, phototherapy protocols, biopsy indication.
+    """
+
+    def __init__(self, llm: Any, vector_store_path: str = _DEFAULT_VECTOR_STORE) -> None:
+        system_prompt = (
+            "You are a board-certified dermatologist specializing in skin lesion analysis, "
+            "dermoscopy interpretation, and cutaneous oncology. "
+            "Apply the ABCDE criteria (Asymmetry, Border, Color, Diameter, Evolving) "
+            "for melanoma screening. Assess Fitzpatrick skin type for phototherapy "
+            "and UV risk evaluation. "
+            "Ground your recommendations in AAD Clinical Practice Guidelines and "
+            "BAD Guidelines for skin cancer management. "
+            "When images are provided, describe lesion morphology using standardized "
+            "dermatologic terminology. "
+            "Cite the specific guideline (e.g., 'AAD Guidelines 2024, "
+            "BAD Melanoma Guidelines 2023')."
+        )
+        super().__init__(llm=llm, system_prompt=system_prompt, vector_store_path=vector_store_path)
+        self.supports_dermoscopy: bool = True
+
+    @property
+    def name(self) -> str:
+        return "DermatologyAgent"
