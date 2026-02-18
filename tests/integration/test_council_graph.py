@@ -17,6 +17,8 @@ from graph import (
     ingestion_node,
     supervisor_route_node,
     specialist_node,
+    safety_check_node,
+    emergency_synthesis_node,
     conflict_check_node,
     research_node,
     debate_node,
@@ -43,6 +45,8 @@ def base_state(sample_patient_context, sample_medical_images):
         "conflict_detected": False,
         "iteration_count": 0,
         "final_plan": "",
+        "red_flag_detected": False,
+        "emergency_override": "",
     }
 
 
@@ -202,7 +206,7 @@ class TestCouncilGraphBuild:
         graph = build_council_graph()
         # The compiled graph should contain our node names
         node_names = set(graph.get_graph().nodes.keys())
-        expected = {"ingestion", "supervisor_route", "specialist", "conflict_check", "synthesis"}
+        expected = {"ingestion", "supervisor_route", "specialist", "safety_check", "conflict_check", "synthesis"}
         assert expected.issubset(node_names), f"Missing nodes: {expected - node_names}"
 
 

@@ -3,14 +3,16 @@ LangGraph state machine definition for MedGemma-Council.
 
 Defines:
 - CouncilState: The shared state TypedDict flowing through all nodes.
-- Node functions: ingestion, routing, specialist analysis, conflict check,
-  research, debate, synthesis.
+- Node functions: ingestion, routing, specialist analysis, safety check,
+  conflict check, research, debate, synthesis, emergency synthesis.
 - build_council_graph(): Constructs and compiles the LangGraph StateGraph.
 
 Graph topology:
-  ingestion -> supervisor_route -> specialist -> conflict_check
-    -> (conflict + under max iterations) -> research -> debate -> conflict_check
-    -> (no conflict OR max iterations) -> synthesis -> END
+  ingestion -> supervisor_route -> specialist -> safety_check
+    -> [red_flag_detected] -> emergency_synthesis -> END
+    -> [safe] -> conflict_check
+      -> (conflict + under max iterations) -> research -> debate -> conflict_check
+      -> (no conflict OR max iterations) -> synthesis -> END
 """
 
 import logging
@@ -33,6 +35,7 @@ from agents.specialists import (
 from agents.radiology import RadiologyAgent
 
 from utils.model_factory import ModelFactory
+from utils.safety import scan_for_red_flags
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +66,10 @@ class CouncilState(TypedDict):
         conflict_detected: Flag indicating disagreement among specialists.
         iteration_count: Counter to prevent infinite debate loops.
         final_plan: The synthesized clinical plan produced by the Judge.
+
+    Safety fields (Phase 12):
+        red_flag_detected: Whether a clinical red flag was found in agent outputs.
+        emergency_override: The emergency referral message if red flag detected.
     """
 
     # Core fields
@@ -78,6 +85,10 @@ class CouncilState(TypedDict):
     conflict_detected: bool
     iteration_count: int
     final_plan: str
+
+    # Safety fields
+    red_flag_detected: bool
+    emergency_override: str
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +262,8 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "consensus_reached": False,
         "conflict_detected": False,
         "final_plan": "",
+        "red_flag_detected": False,
+        "emergency_override": "",
     }
 
 
@@ -283,6 +296,92 @@ def specialist_node(state: Dict[str, Any]) -> Dict[str, Any]:
     current_outputs.update(specialist_outputs)
 
     return {"agent_outputs": current_outputs}
+
+
+def safety_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Scan all agent outputs for clinical red flags.
+
+    If red flags are detected, sets red_flag_detected=True and populates
+    emergency_override with the emergency referral message. The conditional
+    edge after this node will then route to emergency_synthesis instead
+    of the normal conflict_check flow.
+
+    Per CLAUDE.md: "Every agent output must be scanned for Red Flags
+    (e.g., suicide risk, sepsis shock). If found, immediately override
+    with an emergency referral message."
+    """
+    logger.info("Safety check node: scanning agent outputs for red flags")
+
+    agent_outputs = state.get("agent_outputs", {})
+
+    # Concatenate all agent outputs for scanning
+    all_text = " ".join(str(v) for v in agent_outputs.values())
+
+    result = scan_for_red_flags(all_text)
+
+    if result["flagged"]:
+        logger.warning(
+            f"RED FLAG DETECTED: {result['flags']}. "
+            "Short-circuiting to emergency synthesis."
+        )
+        return {
+            "red_flag_detected": True,
+            "emergency_override": result["emergency_message"],
+        }
+
+    logger.info("Safety check: no red flags detected, proceeding normally")
+    return {
+        "red_flag_detected": False,
+        "emergency_override": "",
+    }
+
+
+def emergency_synthesis_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Produce an emergency clinical plan when red flags are detected.
+
+    Short-circuits the normal debate/synthesis flow. Includes:
+    - The emergency override message
+    - All specialist findings that were available at the time
+    - Immediate action instructions
+
+    This node immediately terminates the graph.
+    """
+    logger.info("EMERGENCY synthesis node: producing emergency plan")
+
+    emergency_override = state.get("emergency_override", "")
+    agent_outputs = state.get("agent_outputs", {})
+    patient_context = state.get("patient_context", {})
+
+    plan_parts = [
+        emergency_override,
+        "",
+        "--- Specialist Findings at Time of Emergency Detection ---",
+    ]
+
+    for name, finding in agent_outputs.items():
+        if name != "SupervisorAgent":
+            plan_parts.append(f"  {name}: {finding}")
+
+    plan_parts.extend([
+        "",
+        "--- Immediate Actions Required ---",
+        "1. Activate emergency medical services (call 911 or equivalent).",
+        "2. Initiate appropriate emergency protocols (ACLS, ATLS, etc.).",
+        "3. Transfer to nearest emergency department if not already there.",
+        "4. Ensure continuous monitoring of vital signs.",
+        f"5. Clinical context: {patient_context.get('chief_complaint', 'See above')}.",
+        "",
+        "This AI system has detected a life-threatening condition and has "
+        "terminated normal deliberation. Human clinical judgment is required "
+        "IMMEDIATELY.",
+    ])
+
+    return {
+        "final_plan": "\n".join(plan_parts),
+        "consensus_reached": True,
+    }
 
 
 def conflict_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -347,6 +446,21 @@ def synthesis_node(state: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _should_continue_after_safety(state: Dict[str, Any]) -> str:
+    """
+    After safety check, decide whether to proceed normally or emergency-override.
+
+    Returns:
+        "emergency_synthesis" if red flag detected.
+        "conflict_check" if safe to proceed normally.
+    """
+    if state.get("red_flag_detected", False):
+        logger.warning("Safety override: routing to emergency synthesis")
+        return "emergency_synthesis"
+
+    return "conflict_check"
+
+
 def _should_continue_after_conflict(state: Dict[str, Any]) -> str:
     """
     After conflict check, decide whether to debate or synthesize.
@@ -385,9 +499,11 @@ def build_council_graph():
     Construct and compile the MedGemma-Council LangGraph state machine.
 
     Topology:
-        ingestion -> supervisor_route -> specialist -> conflict_check
-          -> [conflict & under max] -> research -> debate -> conflict_check
-          -> [no conflict | max reached] -> synthesis -> END
+        ingestion -> supervisor_route -> specialist -> safety_check
+          -> [red_flag] -> emergency_synthesis -> END
+          -> [safe] -> conflict_check
+            -> [conflict & under max] -> research -> debate -> conflict_check
+            -> [no conflict | max reached] -> synthesis -> END
 
     Returns:
         A compiled LangGraph application ready for .invoke().
@@ -398,6 +514,8 @@ def build_council_graph():
     graph.add_node("ingestion", ingestion_node)
     graph.add_node("supervisor_route", supervisor_route_node)
     graph.add_node("specialist", specialist_node)
+    graph.add_node("safety_check", safety_check_node)
+    graph.add_node("emergency_synthesis", emergency_synthesis_node)
     graph.add_node("conflict_check", conflict_check_node)
     graph.add_node("research", research_node)
     graph.add_node("debate", debate_node)
@@ -407,7 +525,20 @@ def build_council_graph():
     graph.set_entry_point("ingestion")
     graph.add_edge("ingestion", "supervisor_route")
     graph.add_edge("supervisor_route", "specialist")
-    graph.add_edge("specialist", "conflict_check")
+    graph.add_edge("specialist", "safety_check")
+
+    # Conditional: after safety check, either emergency or normal flow
+    graph.add_conditional_edges(
+        "safety_check",
+        _should_continue_after_safety,
+        {
+            "emergency_synthesis": "emergency_synthesis",
+            "conflict_check": "conflict_check",
+        },
+    )
+
+    # Emergency synthesis terminates the graph
+    graph.add_edge("emergency_synthesis", END)
 
     # Conditional: after conflict check, either debate or synthesize
     graph.add_conditional_edges(
