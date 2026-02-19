@@ -268,7 +268,7 @@ medgemma-council/
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/medgemma-council.git
+git clone https://github.com/matglima/medgemma-council.git
 cd medgemma-council
 
 # Install in development mode
