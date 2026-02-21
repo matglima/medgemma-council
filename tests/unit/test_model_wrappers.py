@@ -686,6 +686,43 @@ class TestTextModelWrapper:
         call_kwargs = mock_model.generate.call_args
         assert "attention_mask" in call_kwargs.kwargs
 
+    def test_handles_batch_encoding_from_apply_chat_template(self):
+        """When apply_chat_template(tokenize=True) returns a BatchEncoding dict
+        (with 'input_ids' and 'attention_mask' keys) instead of a plain tensor,
+        TextModelWrapper should extract the tensors correctly.
+        
+        This fixes the error: 'ones_like(): argument 'input' must be Tensor,
+        not BatchEncoding'
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        # Simulate apply_chat_template returning a BatchEncoding dict
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 5)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        fake_attention_mask = MagicMock()
+        
+        batch_encoding = {
+            "input_ids": fake_input_ids,
+            "attention_mask": fake_attention_mask,
+        }
+        mock_tokenizer.apply_chat_template.return_value = batch_encoding
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        result = wrapper("Test prompt", max_tokens=100)
+
+        # Should extract input_ids from the dict
+        assert "choices" in result
+        # model.generate should have received input_ids
+        call_kwargs = mock_model.generate.call_args
+        assert "input_ids" in call_kwargs.kwargs
+
     # -----------------------------------------------------------------------
     # pad_token_id in generate kwargs (Fix #9: warning elimination)
     # -----------------------------------------------------------------------
@@ -902,8 +939,10 @@ class TestVisionModelWrapper:
         image_entries = [c for c in content if c.get("type") == "image"]
         assert len(image_entries) == 1
 
-    def test_images_passed_to_pipeline_kwarg(self):
-        """The images should still be passed via the images= kwarg."""
+    def test_images_inside_chat_content(self):
+        """Images should be passed inside chat message content with 'url' key,
+        not as a separate images= kwarg. This matches the transformers pipeline
+        expected format for image-text-to-text models."""
         from utils.model_wrappers import VisionModelWrapper
 
         mock_pipeline = MagicMock()
@@ -914,7 +953,18 @@ class TestVisionModelWrapper:
         wrapper(images=images, prompt="Analyze.")
 
         call_kwargs = mock_pipeline.call_args
-        assert call_kwargs.kwargs.get("images") == images
+        # images= should NOT be passed separately
+        assert call_kwargs.kwargs.get("images") is None
+
+        # Instead, images should be inside the chat content
+        text_arg = call_kwargs.kwargs.get("text")
+        assert isinstance(text_arg, list)
+        content = text_arg[0]["content"]
+        image_entries = [c for c in content if c.get("type") == "image"]
+        assert len(image_entries) == 2
+        # Each image entry should have a 'url' key with the image path
+        assert image_entries[0].get("url") == "img1.png"
+        assert image_entries[1].get("url") == "img2.png"
 
 
 class TestMockModelWrapper:

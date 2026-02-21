@@ -139,20 +139,34 @@ class TextModelWrapper:
                 input_ids = tok_out["input_ids"]
                 attention_mask = tok_out.get("attention_mask")
             else:
-                # We got token IDs directly from apply_chat_template.
-                # Move to model device and build attention_mask.
+                # apply_chat_template(tokenize=True, return_tensors="pt") may return:
+                # - A plain Tensor (just input_ids)
+                # - A BatchEncoding dict with 'input_ids' and 'attention_mask' keys
+                # Handle both cases.
+                if isinstance(input_ids, dict):
+                    # BatchEncoding returned — extract tensors
+                    attention_mask = input_ids.get("attention_mask")
+                    input_ids = input_ids["input_ids"]
+                else:
+                    # Plain tensor — create attention_mask
+                    attention_mask = None
+
+                # Move to model device
                 if self.device == "auto":
                     if hasattr(self.model, "device"):
                         input_ids = input_ids.to(self.model.device)
                 else:
                     input_ids = input_ids.to(self.device)
 
-                # Create attention_mask of all 1s (no padding in this path)
-                try:
-                    import torch
-                    attention_mask = torch.ones_like(input_ids)
-                except ImportError:
-                    attention_mask = None
+                # Create attention_mask if not provided
+                if attention_mask is None:
+                    try:
+                        import torch
+                        attention_mask = torch.ones_like(input_ids)
+                    except ImportError:
+                        attention_mask = None
+                else:
+                    attention_mask = attention_mask.to(input_ids.device)
 
             input_len = input_ids.shape[1]
 
@@ -240,17 +254,19 @@ class VisionModelWrapper:
             )
 
             # Format the prompt as chat messages with image entries.
-            # MedGemma 4B IT's processor expects {"type": "image"} entries
-            # in the message content — one per image — so it can insert
-            # <image> tokens in the right places.  Without these entries
-            # the processor raises:
-            #   "Prompt contained 0 image tokens but received N images."
-            content = [{"type": "image"} for _ in images]
+            # MedGemma 4B IT's pipeline expects images inside the message content:
+            #   content = [
+            #     {"type": "image", "url": image_path_or_pil},
+            #     {"type": "text", "text": prompt}
+            #   ]
+            # The pipeline is called with just the messages, not images= separately.
+            content = []
+            for img in images:
+                content.append({"type": "image", "url": img})
             content.append({"type": "text", "text": prompt})
             messages = [{"role": "user", "content": content}]
 
             result = self.pipeline(
-                images=images,
                 text=messages,
                 max_new_tokens=max_new_tokens,
                 **kwargs,
