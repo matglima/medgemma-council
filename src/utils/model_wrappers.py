@@ -213,6 +213,16 @@ class TextModelWrapper:
                 f"generated={output_len - input_len}"
             )
             generated_ids = output_ids[0][input_len:]
+            
+            # Debug: log what we're about to decode
+            if hasattr(generated_ids, 'shape'):
+                gen_len = generated_ids.shape[0] if len(generated_ids.shape) > 0 else 1
+            else:
+                gen_len = len(generated_ids) if hasattr(generated_ids, '__len__') else 1
+            logger.debug(
+                f"TextModelWrapper: generated_ids len={gen_len}, "
+                f"first_5_tokens={list(generated_ids[:5].cpu().numpy()) if hasattr(generated_ids, 'cpu') else generated_ids[:5]}"
+            )
 
             # 4. Decode generated tokens
             text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
