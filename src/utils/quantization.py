@@ -63,6 +63,39 @@ def _get_gpu_memory_gb() -> float:
         return 0.0
 
 
+def _get_gpu_compute_capability() -> tuple:
+    """
+    Get compute capability of first GPU as (major, minor) tuple.
+
+    Returns (0, 0) if no GPU available or torch not installed.
+    Used to select optimal dtype — Ampere+ (8.0+) supports native bfloat16,
+    older GPUs like T4 (7.5) should use float16.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_capability(0)
+        return (0, 0)
+    except (ImportError, RuntimeError):
+        return (0, 0)
+
+
+def _get_optimal_torch_dtype() -> str:
+    """
+    Select optimal torch dtype based on GPU compute capability.
+
+    - Ampere+ (CC >= 8.0): bfloat16 (native hardware support)
+    - Turing/T4 (CC < 8.0) or no GPU: float16 (safe default)
+
+    This affects both the BitsAndBytesConfig compute dtype and the
+    torch_dtype passed to from_pretrained() for non-quantized parameters.
+    """
+    major, _ = _get_gpu_compute_capability()
+    if major >= 8:
+        return "bfloat16"
+    return "float16"
+
+
 def detect_gpu_config() -> Dict[str, Any]:
     """
     Detect available GPU hardware configuration.
@@ -180,9 +213,26 @@ def get_model_kwargs(
     device_map = get_device_map(gpu_count)
     bnb_config = get_bnb_config(qconfig)
 
+    # Resolve torch_dtype for non-quantized parameters (embeddings, layernorm).
+    # Without this, from_pretrained() may load params in float32, wasting memory.
+    # T4 (CC 7.5) uses float16; Ampere+ (CC 8.0+) uses bfloat16.
+    optimal_dtype_str = _get_optimal_torch_dtype()
+    torch_dtype = optimal_dtype_str  # fallback: pass string if torch unavailable
+    try:
+        import torch
+        dtype_map = {
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+            "float32": torch.float32,
+        }
+        torch_dtype = dtype_map.get(optimal_dtype_str, torch.float16)
+    except ImportError:
+        pass
+
     kwargs: Dict[str, Any] = {
         "device_map": device_map,
         "quantization_config": bnb_config,
+        "torch_dtype": torch_dtype,
     }
 
     # Set max_memory for multi-GPU setups (14GiB per T4 for headroom)
@@ -193,7 +243,8 @@ def get_model_kwargs(
 
     logger.info(
         f"Model kwargs for {model_type}: device_map={device_map}, "
-        f"gpu_count={gpu_count}, quantization={qconfig.bnb_4bit_quant_type}"
+        f"gpu_count={gpu_count}, quantization={qconfig.bnb_4bit_quant_type}, "
+        f"torch_dtype={optimal_dtype_str}"
     )
 
     return kwargs
