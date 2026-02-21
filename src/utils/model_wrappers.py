@@ -96,11 +96,14 @@ class TextModelWrapper:
 
             input_len = inputs["input_ids"].shape[1]
 
-            # 2. Generate
+            # 2. Generate (greedy decoding by default to avoid sampling-mode
+            #    amplification of numerical errors from 4-bit dequantization)
+            generate_kwargs = {"do_sample": False}
+            generate_kwargs.update(kwargs)  # allow callers to override
             output_ids = self.model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
-                **kwargs,
+                **generate_kwargs,
             )
 
             # 3. Strip input tokens from output (only keep generated)

@@ -281,6 +281,47 @@ class TestTextModelWrapper:
         call_kwargs = mock_tokenizer.call_args
         assert call_kwargs.kwargs.get("max_length") == 2048
 
+    def test_generate_uses_do_sample_false_by_default(self):
+        """model.generate() should use do_sample=False by default (greedy decoding).
+
+        Sampling mode amplifies numerical errors from bfloat16 dequantization
+        on T4 GPUs into invalid probabilities (inf/nan), triggering CUDA asserts.
+        Greedy decoding avoids softmax sampling entirely.
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_input_ids = MagicMock()
+        mock_input_ids.shape = [1, 10]
+        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        wrapper("test prompt", max_tokens=100)
+
+        call_kwargs = mock_model.generate.call_args
+        assert call_kwargs.kwargs.get("do_sample") is False
+
+    def test_generate_allows_do_sample_override(self):
+        """Callers should be able to override do_sample=True via kwargs."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_input_ids = MagicMock()
+        mock_input_ids.shape = [1, 10]
+        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        wrapper("test prompt", max_tokens=100, do_sample=True)
+
+        call_kwargs = mock_model.generate.call_args
+        assert call_kwargs.kwargs.get("do_sample") is True
+
 
 class TestVisionModelWrapper:
     """Tests for the VisionModelWrapper class."""
