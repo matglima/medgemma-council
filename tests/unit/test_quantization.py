@@ -61,6 +61,24 @@ class TestDetectGpuConfig:
         assert config["gpu_count"] == 2
         assert config["gpu_memory_gb"] == 16.0
 
+    def test_get_gpu_memory_gb_accesses_total_memory_attribute(self):
+        """_get_gpu_memory_gb must use props.total_memory (not total_mem)."""
+        import sys
+        from utils.quantization import _get_gpu_memory_gb
+
+        mock_props = MagicMock(spec=[])  # empty spec so only explicit attrs exist
+        mock_props.total_memory = 16 * (1024 ** 3)  # 16 GB in bytes
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            result = _get_gpu_memory_gb()
+
+        assert result == pytest.approx(16.0)
+        mock_torch.cuda.get_device_properties.assert_called_once_with(0)
+
     def test_detect_gpu_config_no_gpu(self):
         """Should handle no GPU gracefully."""
         from utils.quantization import detect_gpu_config
