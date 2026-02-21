@@ -202,6 +202,85 @@ class TestTextModelWrapper:
         wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
         assert wrapper.device == "auto"
 
+    def test_truncation_enabled_in_tokenizer_call(self):
+        """TextModelWrapper should pass truncation=True to the tokenizer."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_input_ids = MagicMock()
+        mock_input_ids.shape = [1, 10]
+        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        wrapper("test prompt", max_tokens=100)
+
+        call_kwargs = mock_tokenizer.call_args
+        assert call_kwargs.kwargs.get("truncation") is True
+
+    def test_max_length_set_in_tokenizer_call(self):
+        """TextModelWrapper should pass max_length to the tokenizer to prevent unbounded prompts."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_input_ids = MagicMock()
+        mock_input_ids.shape = [1, 10]
+        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        wrapper("test prompt", max_tokens=100)
+
+        call_kwargs = mock_tokenizer.call_args
+        max_length = call_kwargs.kwargs.get("max_length")
+        assert max_length is not None
+        assert isinstance(max_length, int)
+        assert max_length > 0
+
+    def test_default_max_input_tokens(self):
+        """Default max_input_tokens should be 4096."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        assert wrapper.max_input_tokens == 4096
+
+    def test_custom_max_input_tokens(self):
+        """TextModelWrapper should accept a custom max_input_tokens parameter."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        wrapper = TextModelWrapper(
+            model=mock_model, tokenizer=mock_tokenizer, max_input_tokens=2048
+        )
+        assert wrapper.max_input_tokens == 2048
+
+    def test_max_length_uses_max_input_tokens(self):
+        """The tokenizer max_length should equal the wrapper's max_input_tokens."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_input_ids = MagicMock()
+        mock_input_ids.shape = [1, 10]
+        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(
+            model=mock_model, tokenizer=mock_tokenizer, max_input_tokens=2048
+        )
+        wrapper("test prompt", max_tokens=100)
+
+        call_kwargs = mock_tokenizer.call_args
+        assert call_kwargs.kwargs.get("max_length") == 2048
+
 
 class TestVisionModelWrapper:
     """Tests for the VisionModelWrapper class."""

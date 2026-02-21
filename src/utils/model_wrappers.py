@@ -45,10 +45,12 @@ class TextModelWrapper:
         model: Any,
         tokenizer: Any,
         device: str = "auto",
+        max_input_tokens: int = 4096,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        self.max_input_tokens = max_input_tokens
 
     def __call__(
         self,
@@ -69,12 +71,14 @@ class TextModelWrapper:
             Dict in llama-cpp format with generated text.
         """
         try:
-            # 1. Tokenize the prompt
+            # 1. Tokenize the prompt (with truncation to prevent OOM)
             if self.device == "auto":
                 # Let the model's device map handle tensor placement
                 inputs = self.tokenizer(
                     prompt,
                     return_tensors="pt",
+                    truncation=True,
+                    max_length=self.max_input_tokens,
                 )
                 # Move inputs to the model's device if possible
                 if hasattr(self.model, "device"):
@@ -85,6 +89,8 @@ class TextModelWrapper:
                 inputs = self.tokenizer(
                     prompt,
                     return_tensors="pt",
+                    truncation=True,
+                    max_length=self.max_input_tokens,
                 )
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
