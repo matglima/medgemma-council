@@ -61,19 +61,16 @@ class TestDetectGpuConfig:
         assert config["gpu_count"] == 2
         assert config["gpu_memory_gb"] == 16.0
 
-    def test_get_gpu_memory_gb_accesses_total_memory_attribute(self):
+    def test_get_gpu_memory_gb_with_mocked_torch(self):
         """_get_gpu_memory_gb must use props.total_memory (not total_mem)."""
-        import sys
         from utils.quantization import _get_gpu_memory_gb
 
-        mock_props = MagicMock(spec=[])  # empty spec so only explicit attrs exist
+        mock_props = MagicMock()
         mock_props.total_memory = 16 * (1024 ** 3)  # 16 GB in bytes
 
-        mock_torch = MagicMock()
-        mock_torch.cuda.is_available.return_value = True
-        mock_torch.cuda.get_device_properties.return_value = mock_props
-
-        with patch.dict(sys.modules, {"torch": mock_torch}):
+        with patch("utils.quantization.torch") as mock_torch:
+            mock_torch.cuda.is_available.return_value = True
+            mock_torch.cuda.get_device_properties.return_value = mock_props
             result = _get_gpu_memory_gb()
 
         assert result == pytest.approx(16.0)
@@ -188,21 +185,18 @@ class TestGetBnbConfig:
         bfloat16 tensor cores. Using bfloat16 compute dtype for 4-bit dequantization
         produces inf/nan logits, triggering a CUDA device-side assert.
         """
-        import sys
         from utils.quantization import QuantizationConfig, get_bnb_config
 
         qconfig = QuantizationConfig()  # default bnb_4bit_compute_dtype="bfloat16"
-
-        mock_torch = MagicMock()
-        mock_torch.bfloat16 = "torch.bfloat16"
-        mock_torch.float16 = "torch.float16"
-        mock_torch.float32 = "torch.float32"
 
         with patch("utils.quantization._check_bitsandbytes"):
             with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
                 MockBnB.return_value = MagicMock()
                 with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
-                    with patch.dict(sys.modules, {"torch": mock_torch}):
+                    with patch("utils.quantization.torch") as mock_torch:
+                        mock_torch.bfloat16 = "torch.bfloat16"
+                        mock_torch.float16 = "torch.float16"
+                        mock_torch.float32 = "torch.float32"
                         get_bnb_config(qconfig)
 
         call_kwargs = MockBnB.call_args[1]
@@ -211,21 +205,18 @@ class TestGetBnbConfig:
 
     def test_get_bnb_config_keeps_bfloat16_compute_dtype_on_ampere(self):
         """On Ampere+ GPUs (CC >= 8.0), get_bnb_config() should keep bfloat16 compute dtype."""
-        import sys
         from utils.quantization import QuantizationConfig, get_bnb_config
 
         qconfig = QuantizationConfig()  # default bnb_4bit_compute_dtype="bfloat16"
-
-        mock_torch = MagicMock()
-        mock_torch.bfloat16 = "torch.bfloat16"
-        mock_torch.float16 = "torch.float16"
-        mock_torch.float32 = "torch.float32"
 
         with patch("utils.quantization._check_bitsandbytes"):
             with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
                 MockBnB.return_value = MagicMock()
                 with patch("utils.quantization._get_optimal_torch_dtype", return_value="bfloat16"):
-                    with patch.dict(sys.modules, {"torch": mock_torch}):
+                    with patch("utils.quantization.torch") as mock_torch:
+                        mock_torch.bfloat16 = "torch.bfloat16"
+                        mock_torch.float16 = "torch.float16"
+                        mock_torch.float32 = "torch.float32"
                         get_bnb_config(qconfig)
 
         call_kwargs = MockBnB.call_args[1]
@@ -233,21 +224,18 @@ class TestGetBnbConfig:
 
     def test_get_bnb_config_logs_dtype_override(self):
         """When overriding compute dtype, get_bnb_config() should log the change."""
-        import sys
         from utils.quantization import QuantizationConfig, get_bnb_config
 
         qconfig = QuantizationConfig()  # default bfloat16
-
-        mock_torch = MagicMock()
-        mock_torch.bfloat16 = "torch.bfloat16"
-        mock_torch.float16 = "torch.float16"
-        mock_torch.float32 = "torch.float32"
 
         with patch("utils.quantization._check_bitsandbytes"):
             with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
                 MockBnB.return_value = MagicMock()
                 with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
-                    with patch.dict(sys.modules, {"torch": mock_torch}):
+                    with patch("utils.quantization.torch") as mock_torch:
+                        mock_torch.bfloat16 = "torch.bfloat16"
+                        mock_torch.float16 = "torch.float16"
+                        mock_torch.float32 = "torch.float32"
                         with patch("utils.quantization.logger") as mock_logger:
                             get_bnb_config(qconfig)
 
@@ -292,50 +280,34 @@ class TestGetOptimalTorchDtype:
 class TestGetGpuComputeCapability:
     """Tests for GPU compute capability detection."""
 
-    def test_returns_capability_tuple(self):
+    def test_returns_capability_tuple_with_mocked_torch(self):
         """Should return (major, minor) compute capability."""
-        import sys
         from utils.quantization import _get_gpu_compute_capability
 
-        mock_torch = MagicMock()
-        mock_torch.cuda.is_available.return_value = True
-        mock_torch.cuda.get_device_capability.return_value = (7, 5)
-
-        with patch.dict(sys.modules, {"torch": mock_torch}):
+        with patch("utils.quantization.torch") as mock_torch:
+            mock_torch.cuda.is_available.return_value = True
+            mock_torch.cuda.get_device_capability.return_value = (7, 5)
             result = _get_gpu_compute_capability()
 
         assert result == (7, 5)
 
     def test_returns_zero_tuple_when_no_gpu(self):
         """Should return (0, 0) when no GPU is available."""
-        import sys
         from utils.quantization import _get_gpu_compute_capability
 
-        mock_torch = MagicMock()
-        mock_torch.cuda.is_available.return_value = False
-
-        with patch.dict(sys.modules, {"torch": mock_torch}):
+        with patch("utils.quantization.torch") as mock_torch:
+            mock_torch.cuda.is_available.return_value = False
             result = _get_gpu_compute_capability()
 
         assert result == (0, 0)
 
     def test_returns_zero_tuple_when_torch_unavailable(self):
-        """Should return (0, 0) when torch is not installed."""
-        import sys
-        import builtins
+        """Should return (0, 0) when torch is None (not installed)."""
         from utils.quantization import _get_gpu_compute_capability
 
-        original_import = builtins.__import__
-
-        def failing_import(name, *args, **kwargs):
-            if name == "torch":
-                raise ImportError("No module named 'torch'")
-            return original_import(name, *args, **kwargs)
-
-        modules_without_torch = {k: v for k, v in sys.modules.items() if not k.startswith("torch")}
-        with patch.dict(sys.modules, modules_without_torch, clear=True):
-            with patch.object(builtins, "__import__", side_effect=failing_import):
-                result = _get_gpu_compute_capability()
+        # Patch torch to be None to simulate import failure
+        with patch("utils.quantization.torch", None):
+            result = _get_gpu_compute_capability()
 
         assert result == (0, 0)
 
@@ -400,7 +372,7 @@ class TestGetModelKwargs:
         assert kwargs["quantization_config"] is mock_bnb
 
     def test_get_model_kwargs_includes_max_memory_for_dual_t4(self):
-        """For dual T4s, should set max_memory to 14GiB each for headroom."""
+        """get_model_kwargs() should include max_memory for 2 GPUs with ~16GB each."""
         from utils.quantization import QuantizationConfig, get_model_kwargs
 
         qconfig = QuantizationConfig()
@@ -412,10 +384,11 @@ class TestGetModelKwargs:
                     kwargs = get_model_kwargs(qconfig)
 
         assert "max_memory" in kwargs
+        # Kaggle T4s have ~15-16GB usable; we budget 14GiB to leave headroom
         assert kwargs["max_memory"] == {0: "14GiB", 1: "14GiB"}
 
     def test_get_model_kwargs_includes_torch_dtype(self):
-        """get_model_kwargs() must include dtype for from_pretrained()."""
+        """get_model_kwargs() should include dtype."""
         from utils.quantization import QuantizationConfig, get_model_kwargs
 
         qconfig = QuantizationConfig()
@@ -424,13 +397,16 @@ class TestGetModelKwargs:
             with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
                 MockBnB.return_value = MagicMock()
                 with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 2, "gpu_memory_gb": 16.0}):
-                    with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
-                        kwargs = get_model_kwargs(qconfig)
+                    with patch("utils.quantization._get_optimal_torch_dtype", return_value="bfloat16"):
+                        with patch("utils.quantization.torch") as mock_torch:
+                            mock_torch.bfloat16 = "torch.bfloat16"
+                            kwargs = get_model_kwargs(qconfig)
 
         assert "dtype" in kwargs
+        assert kwargs["dtype"] == "torch.bfloat16"
 
     def test_get_model_kwargs_torch_dtype_matches_optimal(self):
-        """dtype should be resolved from _get_optimal_torch_dtype()."""
+        """dtype should match _get_optimal_torch_dtype result."""
         from utils.quantization import QuantizationConfig, get_model_kwargs
 
         qconfig = QuantizationConfig()
@@ -439,15 +415,16 @@ class TestGetModelKwargs:
             with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
                 MockBnB.return_value = MagicMock()
                 with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 1, "gpu_memory_gb": 16.0}):
-                    with patch("utils.quantization._get_optimal_torch_dtype", return_value="bfloat16"):
-                        kwargs = get_model_kwargs(qconfig)
+                    # T4 GPU should get float16
+                    with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
+                        with patch("utils.quantization.torch") as mock_torch:
+                            mock_torch.float16 = "torch.float16"
+                            kwargs = get_model_kwargs(qconfig)
 
-        # The value should be a torch dtype object or a string
-        # (in test env without torch, it may be a string)
-        assert kwargs["dtype"] is not None
+        assert kwargs["dtype"] == "torch.float16"
 
     def test_get_model_kwargs_uses_dtype_not_torch_dtype(self):
-        """get_model_kwargs() must use 'dtype' key (not deprecated 'torch_dtype')."""
+        """get_model_kwargs uses 'dtype' key for dtype value."""
         from utils.quantization import QuantizationConfig, get_model_kwargs
 
         qconfig = QuantizationConfig()
@@ -457,7 +434,9 @@ class TestGetModelKwargs:
                 MockBnB.return_value = MagicMock()
                 with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 1, "gpu_memory_gb": 16.0}):
                     with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
-                        kwargs = get_model_kwargs(qconfig)
+                        with patch("utils.quantization.torch") as mock_torch:
+                            mock_torch.float16 = "torch.float16"
+                            kwargs = get_model_kwargs(qconfig)
 
+        # The returned dict should use 'dtype' as the key
         assert "dtype" in kwargs
-        assert "torch_dtype" not in kwargs

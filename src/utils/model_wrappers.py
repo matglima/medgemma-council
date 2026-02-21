@@ -28,6 +28,14 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Import torch at module level for easier mocking in tests.
+# In environments without torch, this will be None and functions will
+# gracefully fall back to defaults.
+try:
+    import torch  # type: ignore
+except ImportError:
+    torch = None  # type: ignore
+
 
 class TextModelWrapper:
     """
@@ -160,10 +168,9 @@ class TextModelWrapper:
 
                 # Create attention_mask if not provided
                 if attention_mask is None:
-                    try:
-                        import torch
+                    if torch is not None:
                         attention_mask = torch.ones_like(input_ids)
-                    except ImportError:
+                    else:
                         attention_mask = None
                 else:
                     attention_mask = attention_mask.to(input_ids.device)

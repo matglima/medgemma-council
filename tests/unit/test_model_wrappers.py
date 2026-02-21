@@ -674,13 +674,11 @@ class TestTextModelWrapper:
         mock_tokenizer.decode.return_value = "response"
         mock_model.generate.return_value = MagicMock()
 
-        # Mock torch so ones_like is available even without torch installed
-        mock_torch = MagicMock()
+        # Mock torch.ones_like at the module level where it's used
         mock_attention_mask = MagicMock()
-        mock_torch.ones_like.return_value = mock_attention_mask
-
-        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
-        with patch.dict("sys.modules", {"torch": mock_torch}):
+        with patch("utils.model_wrappers.torch") as mock_torch:
+            mock_torch.ones_like.return_value = mock_attention_mask
+            wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
             wrapper("Test prompt", max_tokens=100)
 
         call_kwargs = mock_model.generate.call_args

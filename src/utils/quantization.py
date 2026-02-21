@@ -25,6 +25,14 @@ try:
 except ImportError:
     BitsAndBytesConfig = None  # type: ignore
 
+# Import torch at module level for easier mocking in tests.
+# In environments without torch, this will be None and functions will
+# gracefully fall back to defaults.
+try:
+    import torch  # type: ignore
+except ImportError:
+    torch = None  # type: ignore
+
 
 @dataclass
 class QuantizationConfig:
@@ -44,8 +52,9 @@ class QuantizationConfig:
 
 def _get_gpu_count() -> int:
     """Get the number of available GPUs. Isolated for mocking."""
+    if torch is None:
+        return 0
     try:
-        import torch
         return torch.cuda.device_count()
     except (ImportError, RuntimeError):
         return 0
@@ -53,8 +62,9 @@ def _get_gpu_count() -> int:
 
 def _get_gpu_memory_gb() -> float:
     """Get memory of first GPU in GB. Isolated for mocking."""
+    if torch is None:
+        return 0.0
     try:
-        import torch
         if torch.cuda.is_available():
             props = torch.cuda.get_device_properties(0)
             return props.total_memory / (1024 ** 3)
@@ -71,8 +81,9 @@ def _get_gpu_compute_capability() -> tuple:
     Used to select optimal dtype — Ampere+ (8.0+) supports native bfloat16,
     older GPUs like T4 (7.5) should use float16.
     """
+    if torch is None:
+        return (0, 0)
     try:
-        import torch
         if torch.cuda.is_available():
             return torch.cuda.get_device_capability(0)
         return (0, 0)
@@ -176,17 +187,13 @@ def get_bnb_config(qconfig: QuantizationConfig) -> Any:
     # Resolve string dtype to torch dtype object
     compute_dtype_str = optimal_dtype_str
     compute_dtype: Any = compute_dtype_str  # fallback if torch unavailable
-    try:
-        import torch
+    if torch is not None:
         dtype_map = {
             "bfloat16": torch.bfloat16,
             "float16": torch.float16,
             "float32": torch.float32,
         }
         compute_dtype = dtype_map.get(compute_dtype_str, torch.float16)
-    except ImportError:
-        # In test environments without torch, pass string (BitsAndBytesConfig is mocked)
-        pass
 
     return BitsAndBytesConfig(
         load_in_4bit=qconfig.load_in_4bit,
@@ -238,17 +245,14 @@ def get_model_kwargs(
     # T4 (CC 7.5) uses float16; Ampere+ (CC 8.0+) uses bfloat16.
     # Note: We use 'dtype' (not deprecated 'torch_dtype') for newer transformers.
     optimal_dtype_str = _get_optimal_torch_dtype()
-    torch_dtype = optimal_dtype_str  # fallback: pass string if torch unavailable
-    try:
-        import torch
+    torch_dtype: Any = optimal_dtype_str  # fallback: pass string if torch unavailable
+    if torch is not None:
         dtype_map = {
             "bfloat16": torch.bfloat16,
             "float16": torch.float16,
             "float32": torch.float32,
         }
         torch_dtype = dtype_map.get(optimal_dtype_str, torch.float16)
-    except ImportError:
-        pass
 
     kwargs: Dict[str, Any] = {
         "device_map": device_map,
