@@ -347,3 +347,84 @@ class TestVerifyQuantization:
 
         # Should log a warning since we can't confirm quantization
         mock_logger.warning.assert_called()
+
+
+class TestLoadRealTextModelPadToken:
+    """Tests for pad_token setup in _load_real_text_model().
+
+    TDD: Written BEFORE the fix.
+
+    MedGemma tokenizers may not have a pad_token set, which produces
+    'Setting pad_token_id to eos_token_id' warnings and can cause
+    issues with batched generation. _load_real_text_model() should
+    set pad_token = eos_token when pad_token is missing.
+    """
+
+    def setup_method(self):
+        """Clear cache before each test."""
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+
+    def teardown_method(self):
+        """Clear cache after each test."""
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+
+    def test_sets_pad_token_when_missing(self):
+        """_load_real_text_model should set tokenizer.pad_token = eos_token if pad_token is None."""
+        import sys
+        from utils.model_factory import ModelFactory
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token = None
+        mock_tokenizer.eos_token = "</s>"
+
+        mock_model = MagicMock()
+        mock_model.is_quantized = True
+
+        # Mock transformers module for the local import inside _load_real_text_model
+        mock_transformers = MagicMock()
+        mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
+
+        with patch.dict(os.environ, {"MEDGEMMA_USE_REAL_MODELS": "true"}):
+            factory = ModelFactory()
+
+        with patch.dict(sys.modules, {"transformers": mock_transformers}):
+            with patch("utils.quantization._check_bitsandbytes"):
+                with patch("utils.quantization.BitsAndBytesConfig", return_value=MagicMock()):
+                    with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 1, "gpu_memory_gb": 16.0}):
+                        with patch("utils.model_factory._verify_quantization"):
+                            factory._load_real_text_model("test-model")
+
+        # After loading, pad_token should be set to eos_token
+        assert mock_tokenizer.pad_token == "</s>"
+
+    def test_preserves_existing_pad_token(self):
+        """_load_real_text_model should NOT override an existing pad_token."""
+        import sys
+        from utils.model_factory import ModelFactory
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token = "<pad>"
+        mock_tokenizer.eos_token = "</s>"
+
+        mock_model = MagicMock()
+        mock_model.is_quantized = True
+
+        mock_transformers = MagicMock()
+        mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
+
+        with patch.dict(os.environ, {"MEDGEMMA_USE_REAL_MODELS": "true"}):
+            factory = ModelFactory()
+
+        with patch.dict(sys.modules, {"transformers": mock_transformers}):
+            with patch("utils.quantization._check_bitsandbytes"):
+                with patch("utils.quantization.BitsAndBytesConfig", return_value=MagicMock()):
+                    with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 1, "gpu_memory_gb": 16.0}):
+                        with patch("utils.model_factory._verify_quantization"):
+                            factory._load_real_text_model("test-model")
+
+        # Existing pad_token should be preserved
+        assert mock_tokenizer.pad_token == "<pad>"

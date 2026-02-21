@@ -196,6 +196,17 @@ class ModelFactory:
         model_kwargs = get_model_kwargs(qconfig, model_type="text")
 
         tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+        # Set pad_token if missing — MedGemma tokenizers may not have one,
+        # which causes "Setting pad_token_id to eos_token_id" warnings and
+        # can cause issues with batched generation.
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+            logger.info(
+                f"Set tokenizer.pad_token = eos_token ('{tokenizer.eos_token}') "
+                f"for model '{model_id}' (was None)"
+            )
+
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             **model_kwargs,
