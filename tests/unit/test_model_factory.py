@@ -18,6 +18,16 @@ import os
 class TestModelFactory:
     """Tests for the ModelFactory class."""
 
+    def setup_method(self):
+        """Clear the model cache before each test to ensure isolation."""
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+
+    def teardown_method(self):
+        """Clear the model cache after each test."""
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+
     def test_factory_defaults_to_mock_mode(self):
         """ModelFactory should default to mock mode (no real models)."""
         from utils.model_factory import ModelFactory
@@ -141,6 +151,158 @@ class TestModelFactory:
             model = factory.create_vision_model()
 
         assert isinstance(model, MagicMock)  # It's a MagicMock with VisionModelWrapper spec
+
+
+class TestModelCaching:
+    """Tests for ModelFactory class-level model caching.
+
+    TDD: Written BEFORE caching implementation.
+
+    The ModelFactory must cache models at the class level so that:
+    1. Multiple ModelFactory instances share the same cached model.
+    2. create_text_model() with the same model_id returns the same object.
+    3. create_vision_model() with the same model_id returns the same object.
+    4. Different model_ids produce different cached entries.
+    5. clear_cache() resets the cache (needed for test isolation).
+    6. In real mode, _load_real_text_model is only called once per model_id.
+    """
+
+    def setup_method(self):
+        """Clear the cache before each test to ensure isolation."""
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+
+    def teardown_method(self):
+        """Clear the cache after each test."""
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+
+    def test_text_model_cached_across_calls(self):
+        """Calling create_text_model() twice should return the same object."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory = ModelFactory()
+            model1 = factory.create_text_model()
+            model2 = factory.create_text_model()
+
+        assert model1 is model2
+
+    def test_text_model_cached_across_factory_instances(self):
+        """Different ModelFactory instances should share cached text models."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory1 = ModelFactory()
+            model1 = factory1.create_text_model()
+
+            factory2 = ModelFactory()
+            model2 = factory2.create_text_model()
+
+        assert model1 is model2
+
+    def test_vision_model_cached_across_calls(self):
+        """Calling create_vision_model() twice should return the same object."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory = ModelFactory()
+            model1 = factory.create_vision_model()
+            model2 = factory.create_vision_model()
+
+        assert model1 is model2
+
+    def test_vision_model_cached_across_factory_instances(self):
+        """Different ModelFactory instances should share cached vision models."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory1 = ModelFactory()
+            model1 = factory1.create_vision_model()
+
+            factory2 = ModelFactory()
+            model2 = factory2.create_vision_model()
+
+        assert model1 is model2
+
+    def test_different_model_ids_not_shared(self):
+        """Different model_ids should produce separate cache entries."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory = ModelFactory()
+            model_a = factory.create_text_model(model_id="model-a")
+            model_b = factory.create_text_model(model_id="model-b")
+
+        assert model_a is not model_b
+
+    def test_clear_cache_resets_text_model(self):
+        """clear_cache() should cause the next call to create a new instance."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory = ModelFactory()
+            model1 = factory.create_text_model()
+            ModelFactory.clear_cache()
+            model2 = factory.create_text_model()
+
+        assert model1 is not model2
+
+    def test_clear_cache_resets_vision_model(self):
+        """clear_cache() should cause the next call to create a new instance."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory = ModelFactory()
+            model1 = factory.create_vision_model()
+            ModelFactory.clear_cache()
+            model2 = factory.create_vision_model()
+
+        assert model1 is not model2
+
+    def test_real_mode_loader_called_only_once(self):
+        """In real mode, _load_real_text_model should be called only once per model_id."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {"MEDGEMMA_USE_REAL_MODELS": "true"}):
+            factory = ModelFactory()
+
+        mock_wrapper = MagicMock()
+        with patch.object(factory, "_load_real_text_model", return_value=mock_wrapper) as mock_loader:
+            model1 = factory.create_text_model()
+            model2 = factory.create_text_model()
+
+        # Loader should be called exactly once; second call should hit cache
+        mock_loader.assert_called_once()
+        assert model1 is model2
+
+    def test_text_and_vision_caches_are_independent(self):
+        """Text and vision models should use separate cache namespaces."""
+        from utils.model_factory import ModelFactory
+        from utils.model_wrappers import MockModelWrapper
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory = ModelFactory()
+            text_model = factory.create_text_model()
+            vision_model = factory.create_vision_model()
+
+        assert text_model is not vision_model
+        assert isinstance(text_model, MockModelWrapper)
+        assert isinstance(vision_model, MockModelWrapper)
+        assert text_model.mode == "text"
+        assert vision_model.mode == "vision"
+
+    def test_cache_key_includes_model_type_prefix(self):
+        """Cache should distinguish text vs vision even with same model_id string."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory = ModelFactory()
+            # Use the same string as model_id for both text and vision
+            text_model = factory.create_text_model(model_id="same-model")
+            vision_model = factory.create_vision_model(model_id="same-model")
+
+        assert text_model is not vision_model
 
 
 class TestVerifyQuantization:
