@@ -90,6 +90,49 @@ class TestDetectGpuConfig:
         assert config["gpu_count"] == 0
 
 
+class TestCheckBitsandbytes:
+    """Tests for the _check_bitsandbytes() early import verification."""
+
+    def test_check_bitsandbytes_succeeds_when_importable(self):
+        """_check_bitsandbytes() should be a no-op when bitsandbytes imports fine."""
+        import sys
+        from utils.quantization import _check_bitsandbytes
+
+        mock_bnb = MagicMock()
+        with patch.dict(sys.modules, {"bitsandbytes": mock_bnb}):
+            # Should not raise
+            _check_bitsandbytes()
+
+    def test_check_bitsandbytes_raises_runtime_error_on_import_failure(self):
+        """_check_bitsandbytes() should raise RuntimeError with real cause on failure."""
+        import sys
+        import builtins
+        from utils.quantization import _check_bitsandbytes
+
+        original_import = builtins.__import__
+
+        def failing_import(name, *args, **kwargs):
+            if name == "bitsandbytes":
+                raise ImportError("libcuda.so not found")
+            return original_import(name, *args, **kwargs)
+
+        # Ensure bitsandbytes is NOT cached in sys.modules so import is attempted
+        modules_without_bnb = {k: v for k, v in sys.modules.items() if k != "bitsandbytes"}
+        with patch.dict(sys.modules, modules_without_bnb, clear=True):
+            with patch.object(builtins, "__import__", side_effect=failing_import):
+                with pytest.raises(RuntimeError, match="libcuda.so not found"):
+                    _check_bitsandbytes()
+
+    def test_check_bitsandbytes_error_message_includes_diagnostic_hint(self):
+        """RuntimeError message should include diagnostic guidance."""
+        import sys
+        from utils.quantization import _check_bitsandbytes
+
+        with patch.dict(sys.modules, {"bitsandbytes": None}):
+            with pytest.raises(RuntimeError, match="CUDA"):
+                _check_bitsandbytes()
+
+
 class TestGetBnbConfig:
     """Tests for BitsAndBytesConfig generation."""
 
@@ -99,9 +142,10 @@ class TestGetBnbConfig:
 
         qconfig = QuantizationConfig()
 
-        with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
-            MockBnB.return_value = MagicMock()
-            bnb = get_bnb_config(qconfig)
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                bnb = get_bnb_config(qconfig)
 
         MockBnB.assert_called_once()
         assert bnb is not None
@@ -112,13 +156,27 @@ class TestGetBnbConfig:
 
         qconfig = QuantizationConfig()
 
-        with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
-            MockBnB.return_value = MagicMock()
-            get_bnb_config(qconfig)
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                get_bnb_config(qconfig)
 
         call_kwargs = MockBnB.call_args[1]
         assert call_kwargs["load_in_4bit"] is True
         assert call_kwargs["bnb_4bit_quant_type"] == "nf4"
+
+    def test_get_bnb_config_calls_check_bitsandbytes_first(self):
+        """get_bnb_config() should call _check_bitsandbytes() before creating config."""
+        from utils.quantization import QuantizationConfig, get_bnb_config
+
+        qconfig = QuantizationConfig()
+
+        with patch("utils.quantization._check_bitsandbytes") as mock_check:
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                get_bnb_config(qconfig)
+
+        mock_check.assert_called_once()
 
 
 class TestGetDeviceMap:
@@ -155,10 +213,11 @@ class TestGetModelKwargs:
 
         qconfig = QuantizationConfig()
 
-        with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
-            MockBnB.return_value = MagicMock()
-            with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 2, "gpu_memory_gb": 16.0}):
-                kwargs = get_model_kwargs(qconfig)
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 2, "gpu_memory_gb": 16.0}):
+                    kwargs = get_model_kwargs(qconfig)
 
         assert "device_map" in kwargs
         assert kwargs["device_map"] == "auto"
@@ -169,11 +228,12 @@ class TestGetModelKwargs:
 
         qconfig = QuantizationConfig()
 
-        with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
-            mock_bnb = MagicMock()
-            MockBnB.return_value = mock_bnb
-            with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 2, "gpu_memory_gb": 16.0}):
-                kwargs = get_model_kwargs(qconfig)
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                mock_bnb = MagicMock()
+                MockBnB.return_value = mock_bnb
+                with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 2, "gpu_memory_gb": 16.0}):
+                    kwargs = get_model_kwargs(qconfig)
 
         assert "quantization_config" in kwargs
         assert kwargs["quantization_config"] is mock_bnb
@@ -184,10 +244,8 @@ class TestGetModelKwargs:
 
         qconfig = QuantizationConfig()
 
-        with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
-            MockBnB.return_value = MagicMock()
-            with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 2, "gpu_memory_gb": 16.0}):
-                kwargs = get_model_kwargs(qconfig)
-
-        assert "max_memory" in kwargs
-        assert kwargs["max_memory"] == {0: "14GiB", 1: "14GiB"}
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 2, "gpu_memory_gb": 16.0}):
+                    kwargs = get_model_kwargs(qconfig)

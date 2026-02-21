@@ -82,6 +82,28 @@ def detect_gpu_config() -> Dict[str, Any]:
     return config
 
 
+def _check_bitsandbytes() -> None:
+    """
+    Verify that bitsandbytes can actually be imported with its CUDA backend.
+
+    transformers will silently catch import failures and raise a misleading
+    "pip install bitsandbytes" error. This function surfaces the real cause
+    (e.g., missing CUDA libraries, version mismatch) early.
+
+    Raises:
+        RuntimeError: If bitsandbytes cannot be imported, with the real error.
+    """
+    try:
+        import bitsandbytes  # noqa: F401
+    except Exception as e:
+        raise RuntimeError(
+            f"bitsandbytes is installed but failed to import: {e}\n"
+            "This usually means CUDA libraries are missing or incompatible.\n"
+            "Check that your CUDA toolkit version matches your bitsandbytes build.\n"
+            "Try: python -c 'import bitsandbytes' to see the full traceback."
+        ) from e
+
+
 def get_bnb_config(qconfig: QuantizationConfig) -> Any:
     """
     Generate a BitsAndBytesConfig from our QuantizationConfig.
@@ -91,7 +113,14 @@ def get_bnb_config(qconfig: QuantizationConfig) -> Any:
 
     Returns:
         A transformers BitsAndBytesConfig instance.
+
+    Raises:
+        RuntimeError: If bitsandbytes cannot be imported (CUDA issues).
     """
+    # Verify bitsandbytes is actually functional before transformers tries
+    # to use it (transformers gives a misleading "pip install" error otherwise)
+    _check_bitsandbytes()
+
     # Resolve compute dtype — defer torch import for test-friendliness
     compute_dtype = qconfig.bnb_4bit_compute_dtype
     try:
