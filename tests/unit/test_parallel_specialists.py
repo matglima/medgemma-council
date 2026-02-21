@@ -407,3 +407,125 @@ class TestBackwardCompatibility:
 
         assert result["consensus_reached"] is True
         assert "Combined plan" in result["final_plan"]
+
+
+# ---------------------------------------------------------------------------
+# Test: RadiologyAgent receives vision model (Fix #8)
+# ---------------------------------------------------------------------------
+
+
+class TestRadiologyAgentVisionModel:
+    """RadiologyAgent should receive a vision model, not the text model.
+
+    _run_specialists() creates one text model and passes it to ALL agents.
+    But RadiologyAgent calls self.llm(images=..., prompt=...) which is the
+    VisionModelWrapper interface.  Passing the text model causes
+    AutoModelForCausalLM to reject the 'images' kwarg.
+    """
+
+    @patch("graph.ModelFactory")
+    def test_radiology_agent_gets_vision_model(self, MockFactory):
+        """When RadiologyAgent is activated, it should receive the vision model."""
+        from graph import _run_specialists
+
+        mock_factory_inst = MagicMock()
+        mock_text_llm = MagicMock(name="text_llm")
+        mock_vision_llm = MagicMock(name="vision_llm")
+        mock_factory_inst.create_text_model.return_value = mock_text_llm
+        mock_factory_inst.create_vision_model.return_value = mock_vision_llm
+        MockFactory.return_value = mock_factory_inst
+
+        state = {
+            "agent_outputs": {
+                "SupervisorAgent": "Routing to specialists: RadiologyAgent"
+            },
+            "patient_context": {},
+            "medical_images": ["chest_xray.png"],
+        }
+
+        with patch("graph.RadiologyAgent") as MockRadiology:
+            MockRadiology.return_value.analyze.return_value = {
+                "agent_outputs": {"RadiologyAgent": "No acute findings."}
+            }
+
+            _run_specialists(state)
+
+            # RadiologyAgent should be instantiated with the vision model
+            MockRadiology.assert_called_once()
+            call_kwargs = MockRadiology.call_args
+            passed_llm = call_kwargs[1].get("llm") or call_kwargs[0][0]
+            assert passed_llm is mock_vision_llm, (
+                "RadiologyAgent should receive vision_llm, not text_llm"
+            )
+
+    @patch("graph.ModelFactory")
+    def test_text_agents_still_get_text_model_when_radiology_active(self, MockFactory):
+        """Non-radiology agents should still get the text model even when
+        RadiologyAgent is also activated.
+        """
+        from graph import _run_specialists
+
+        mock_factory_inst = MagicMock()
+        mock_text_llm = MagicMock(name="text_llm")
+        mock_vision_llm = MagicMock(name="vision_llm")
+        mock_factory_inst.create_text_model.return_value = mock_text_llm
+        mock_factory_inst.create_vision_model.return_value = mock_vision_llm
+        MockFactory.return_value = mock_factory_inst
+
+        state = {
+            "agent_outputs": {
+                "SupervisorAgent": "Routing to specialists: CardiologyAgent, RadiologyAgent"
+            },
+            "patient_context": {},
+            "medical_images": ["chest_xray.png"],
+        }
+
+        with patch("graph.CardiologyAgent") as MockCardio, \
+             patch("graph.RadiologyAgent") as MockRadiology:
+            MockCardio.return_value.analyze.return_value = {
+                "agent_outputs": {"CardiologyAgent": "ACS likely."}
+            }
+            MockRadiology.return_value.analyze.return_value = {
+                "agent_outputs": {"RadiologyAgent": "No acute findings."}
+            }
+
+            _run_specialists(state)
+
+            # CardiologyAgent should get text model
+            MockCardio.assert_called_once()
+            cardio_llm = MockCardio.call_args[1].get("llm") or MockCardio.call_args[0][0]
+            assert cardio_llm is mock_text_llm
+
+            # RadiologyAgent should get vision model
+            MockRadiology.assert_called_once()
+            radio_llm = MockRadiology.call_args[1].get("llm") or MockRadiology.call_args[0][0]
+            assert radio_llm is mock_vision_llm
+
+    @patch("graph.ModelFactory")
+    def test_vision_model_not_created_when_radiology_inactive(self, MockFactory):
+        """create_vision_model() should NOT be called if RadiologyAgent is
+        not among the activated specialists (avoid loading unnecessary model).
+        """
+        from graph import _run_specialists
+
+        mock_factory_inst = MagicMock()
+        mock_factory_inst.create_text_model.return_value = MagicMock()
+        MockFactory.return_value = mock_factory_inst
+
+        state = {
+            "agent_outputs": {
+                "SupervisorAgent": "Routing to specialists: CardiologyAgent"
+            },
+            "patient_context": {},
+            "medical_images": [],
+        }
+
+        with patch("graph.CardiologyAgent") as MockCardio:
+            MockCardio.return_value.analyze.return_value = {
+                "agent_outputs": {"CardiologyAgent": "ACS likely."}
+            }
+
+            _run_specialists(state)
+
+        # Vision model should not have been created
+        mock_factory_inst.create_vision_model.assert_not_called()

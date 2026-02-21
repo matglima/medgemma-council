@@ -194,6 +194,14 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
 
     llm = factory.create_text_model()
 
+    # Create vision model only if RadiologyAgent is activated (avoid loading
+    # the 4B multimodal model unnecessarily).  RadiologyAgent calls
+    # self.llm(images=..., prompt=...) — the VisionModelWrapper interface.
+    # Passing the text model causes AutoModelForCausalLM to reject 'images'.
+    vision_llm = None
+    if "RadiologyAgent" in activated:
+        vision_llm = factory.create_vision_model()
+
     # Determine thread-pool size
     # Default to sequential (max_workers=1) to prevent CUDA OOM from
     # concurrent model.generate() calls on limited-VRAM GPUs (e.g. 2xT4).
@@ -208,8 +216,11 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
         future_to_name = {}
         for agent_name in activated:
             agent_cls = agent_registry[agent_name]
+            # RadiologyAgent needs the vision model (VisionModelWrapper);
+            # all other agents use the text model (TextModelWrapper).
+            agent_llm = vision_llm if agent_name == "RadiologyAgent" else llm
             future = executor.submit(
-                _run_single_specialist, agent_name, agent_cls, llm, state
+                _run_single_specialist, agent_name, agent_cls, agent_llm, state
             )
             future_to_name[future] = agent_name
 
