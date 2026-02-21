@@ -149,14 +149,18 @@ class TextModelWrapper:
             else:
                 # apply_chat_template(tokenize=True, return_tensors="pt") may return:
                 # - A plain Tensor (just input_ids)
-                # - A BatchEncoding dict with 'input_ids' and 'attention_mask' keys
-                # Handle both cases.
-                if isinstance(input_ids, dict):
-                    # BatchEncoding returned — extract tensors
-                    attention_mask = input_ids.get("attention_mask")
-                    input_ids = input_ids["input_ids"]
-                else:
-                    # Plain tensor — create attention_mask
+                # - A BatchEncoding dict-like with 'input_ids' and 'attention_mask' keys
+                # Handle both cases. Check for "input_ids" key presence specifically.
+                # Use try/except for robustness across different object types.
+                try:
+                    # If input_ids has an "input_ids" key, it's a BatchEncoding
+                    if "input_ids" in input_ids:
+                        attention_mask = input_ids.get("attention_mask")
+                        input_ids = input_ids["input_ids"]
+                    else:
+                        attention_mask = None
+                except (TypeError, KeyError):
+                    # Not a dict-like object, must be a plain tensor
                     attention_mask = None
 
                 # Move to model device

@@ -1053,6 +1053,8 @@ class TestTextModelWrapperLogging:
         fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
         # .to() must return a tensor with the same shape so input_len resolves
         fake_input_ids.to.return_value = fake_input_ids
+        # Make `"input_ids" in fake_input_ids` return False (it's a tensor, not BatchEncoding)
+        fake_input_ids.__contains__ = MagicMock(return_value=False)
         mock_tokenizer.apply_chat_template.return_value = fake_input_ids
         mock_tokenizer.decode.return_value = "response"
         mock_model.generate.return_value = MagicMock()
