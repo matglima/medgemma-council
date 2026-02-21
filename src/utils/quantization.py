@@ -213,9 +213,10 @@ def get_model_kwargs(
     device_map = get_device_map(gpu_count)
     bnb_config = get_bnb_config(qconfig)
 
-    # Resolve torch_dtype for non-quantized parameters (embeddings, layernorm).
+    # Resolve dtype for non-quantized parameters (embeddings, layernorm).
     # Without this, from_pretrained() may load params in float32, wasting memory.
     # T4 (CC 7.5) uses float16; Ampere+ (CC 8.0+) uses bfloat16.
+    # Note: We use 'dtype' (not deprecated 'torch_dtype') for newer transformers.
     optimal_dtype_str = _get_optimal_torch_dtype()
     torch_dtype = optimal_dtype_str  # fallback: pass string if torch unavailable
     try:
@@ -232,7 +233,7 @@ def get_model_kwargs(
     kwargs: Dict[str, Any] = {
         "device_map": device_map,
         "quantization_config": bnb_config,
-        "torch_dtype": torch_dtype,
+        "dtype": torch_dtype,
     }
 
     # Set max_memory for multi-GPU setups (14GiB per T4 for headroom)

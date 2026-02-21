@@ -337,7 +337,7 @@ class TestGetModelKwargs:
         assert kwargs["max_memory"] == {0: "14GiB", 1: "14GiB"}
 
     def test_get_model_kwargs_includes_torch_dtype(self):
-        """get_model_kwargs() must include torch_dtype for from_pretrained()."""
+        """get_model_kwargs() must include dtype for from_pretrained()."""
         from utils.quantization import QuantizationConfig, get_model_kwargs
 
         qconfig = QuantizationConfig()
@@ -349,10 +349,10 @@ class TestGetModelKwargs:
                     with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
                         kwargs = get_model_kwargs(qconfig)
 
-        assert "torch_dtype" in kwargs
+        assert "dtype" in kwargs
 
     def test_get_model_kwargs_torch_dtype_matches_optimal(self):
-        """torch_dtype should be resolved from _get_optimal_torch_dtype()."""
+        """dtype should be resolved from _get_optimal_torch_dtype()."""
         from utils.quantization import QuantizationConfig, get_model_kwargs
 
         qconfig = QuantizationConfig()
@@ -366,4 +366,20 @@ class TestGetModelKwargs:
 
         # The value should be a torch dtype object or a string
         # (in test env without torch, it may be a string)
-        assert kwargs["torch_dtype"] is not None
+        assert kwargs["dtype"] is not None
+
+    def test_get_model_kwargs_uses_dtype_not_torch_dtype(self):
+        """get_model_kwargs() must use 'dtype' key (not deprecated 'torch_dtype')."""
+        from utils.quantization import QuantizationConfig, get_model_kwargs
+
+        qconfig = QuantizationConfig()
+
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 1, "gpu_memory_gb": 16.0}):
+                    with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
+                        kwargs = get_model_kwargs(qconfig)
+
+        assert "dtype" in kwargs
+        assert "torch_dtype" not in kwargs
