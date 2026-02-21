@@ -212,17 +212,41 @@ class TextModelWrapper:
                 f"TextModelWrapper: input_len={input_len}, output_len={output_len}, "
                 f"generated={output_len - input_len}"
             )
+            
+            # Debug: check what's in the full output before slicing
+            try:
+                import numpy as np
+                full_seq = output_ids[0].cpu().numpy() if hasattr(output_ids[0], 'cpu') else np.array(output_ids[0])
+                logger.debug(
+                    f"TextModelWrapper: full_seq first_10={full_seq[:10].tolist()}, "
+                    f"last_10={full_seq[-10:].tolist()}, "
+                    f"at_input_len={full_seq[input_len:input_len+5].tolist() if input_len < len(full_seq) else 'N/A'}"
+                )
+            except Exception as e:
+                logger.debug(f"TextModelWrapper: could not inspect full output: {e}")
+            
             generated_ids = output_ids[0][input_len:]
             
             # Debug: log what we're about to decode
             if hasattr(generated_ids, 'shape'):
                 gen_len = generated_ids.shape[0] if len(generated_ids.shape) > 0 else 1
+                # Check for unique tokens
+                try:
+                    import numpy as np
+                    unique_tokens = np.unique(generated_ids.cpu().numpy())
+                    logger.debug(
+                        f"TextModelWrapper: generated_ids len={gen_len}, "
+                        f"unique_tokens={unique_tokens[:20].tolist()}, "
+                        f"num_unique={len(unique_tokens)}"
+                    )
+                except Exception:
+                    logger.debug(
+                        f"TextModelWrapper: generated_ids len={gen_len}, "
+                        f"first_5={list(generated_ids[:5].cpu().numpy()) if hasattr(generated_ids, 'cpu') else generated_ids[:5]}"
+                    )
             else:
                 gen_len = len(generated_ids) if hasattr(generated_ids, '__len__') else 1
-            logger.debug(
-                f"TextModelWrapper: generated_ids len={gen_len}, "
-                f"first_5_tokens={list(generated_ids[:5].cpu().numpy()) if hasattr(generated_ids, 'cpu') else generated_ids[:5]}"
-            )
+                logger.debug(f"TextModelWrapper: generated_ids len={gen_len}")
 
             # 4. Decode generated tokens
             text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
