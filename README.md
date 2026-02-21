@@ -1,7 +1,7 @@
 # MedGemma-Council
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-416%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-450%20passing-brightgreen.svg)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-purple.svg)](https://github.com/langchain-ai/langgraph)
 
@@ -198,7 +198,7 @@ The pipeline uses sliding-window chunking with configurable overlap and attaches
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock (416 tests) |
+| Testing | pytest + unittest.mock (450 tests) |
 
 ---
 
@@ -282,7 +282,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all 416 tests (< 2 seconds, no GPU needed)
+# Run all 450 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -310,12 +310,57 @@ python council_cli.py \
   --complaint "Chest pain radiating to left arm" \
   --images /path/to/xray.png /path/to/ct_scan.dcm
 
+# Use the faster 4B model instead of 27B
+python council_cli.py \
+  --age 65 \
+  --sex Male \
+  --complaint "Chest pain" \
+  --model-id google/medgemma-4b-it
+
+# Quiet mode (suppress debug logging; verbose is default)
+python council_cli.py \
+  --age 65 \
+  --sex Male \
+  --complaint "Chest pain" \
+  --quiet
+
 # JSON output
 python council_cli.py \
   --age 65 \
   --sex Male \
   --complaint "Chest pain" \
   --output json
+```
+
+#### Programmatic Usage
+
+```python
+from council_cli import run_council_cli
+
+# Default: verbose=True (DEBUG-level logging), uses 27B model
+result = run_council_cli(
+    age=65,
+    sex="Male",
+    chief_complaint="Chest pain radiating to left arm",
+    history="Hypertension, Type 2 Diabetes",
+    medications=["Aspirin", "Lisinopril"],
+)
+
+# Use 4B model for faster inference on Kaggle
+result = run_council_cli(
+    age=65,
+    sex="Male",
+    chief_complaint="Chest pain",
+    text_model_id="google/medgemma-4b-it",
+)
+
+# Quiet mode
+result = run_council_cli(
+    age=65,
+    sex="Male",
+    chief_complaint="Chest pain",
+    verbose=False,
+)
 ```
 
 ### Gradio UI
@@ -356,7 +401,7 @@ docker run -p 7860:7860 medgemma-council python app_gradio.py
 # Install the package
 !pip install -e /kaggle/working/medgemma-council
 
-# CLI-first workflow
+# CLI-first workflow (verbose debug logging on by default)
 from council_cli import run_council_cli
 
 result = run_council_cli(
@@ -368,6 +413,21 @@ result = run_council_cli(
 )
 
 print(result["final_plan"])
+
+# Use 4B model for faster inference on 2xT4 GPUs
+result = run_council_cli(
+    age=65,
+    sex="Male",
+    chief_complaint="Chest pain radiating to left arm",
+    text_model_id="google/medgemma-4b-it",
+)
+```
+
+You can also select the text model via environment variable:
+
+```python
+import os
+os.environ["MEDGEMMA_TEXT_MODEL_ID"] = "google/medgemma-4b-it"
 ```
 
 See `example_kaggle_notebook.ipynb` for a complete walkthrough.
@@ -465,13 +525,15 @@ The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_U
 
 **GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the 27B model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. `TextModelWrapper` truncates input prompts to `max_input_tokens=4096` to bound KV cache allocation. Generation uses greedy decoding (`do_sample=False`) by default to prevent sampling-mode amplification of numerical errors.
 
-**Chat Template Formatting:** `TextModelWrapper` applies `tokenizer.apply_chat_template()` to wrap prompts in the instruction-tuned model's expected format (e.g., `<start_of_turn>user`/`<start_of_turn>model` markers for Gemma 2 IT). Without the chat template, the model generates EOS immediately, producing empty outputs. Falls back to raw prompt for tokenizers without chat template support.
+**Chat Template Formatting:** `TextModelWrapper` applies `tokenizer.apply_chat_template(tokenize=True, truncation=True)` to wrap prompts in the instruction-tuned model's expected format (e.g., `<start_of_turn>user`/`<start_of_turn>model` markers for Gemma 2 IT). Using `tokenize=True` in a single step ensures truncation preserves structural markers; the older two-step approach (tokenize=False then separate truncation) would cut off model-turn markers, causing empty outputs. Falls back gracefully to string-based tokenization, and then to raw prompt for tokenizers without chat template support.
 
-**Vision Model Routing:** When `RadiologyAgent` is activated, `_run_specialists()` creates a separate `VisionModelWrapper` via `factory.create_vision_model()` and passes it specifically to RadiologyAgent. All other specialists receive the text model. The vision model is only loaded when RadiologyAgent is among the activated specialists, avoiding unnecessary model loading.
+**Vision Model Routing:** When `RadiologyAgent` is activated, `_run_specialists()` creates a separate `VisionModelWrapper` via `factory.create_vision_model()` and passes it specifically to RadiologyAgent. All other specialists receive the text model. The vision model is only loaded when RadiologyAgent is among the activated specialists, avoiding unnecessary model loading. The vision pipeline formats prompts as chat messages with `{"type": "image"}` entries (one per image) to satisfy MedGemma 4B IT's processor requirements.
+
+**Verbose Logging:** All model wrappers, specialist agents, and supervisor methods include `logger.debug()` / `logger.info()` calls that trace: prompt lengths (chars), input token counts, template path used, RAG chunk counts, routing decisions, conflict results, and output previews (first 200 chars). Enable with `verbose=True` (the default) in `run_council_cli()`, or set `--quiet` on the CLI to suppress.
 
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (416 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (450 tests) completes in < 2 seconds.
 
 ---
 
