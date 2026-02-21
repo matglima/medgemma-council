@@ -1,7 +1,7 @@
 # MedGemma-Council
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-367%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-400%20passing-brightgreen.svg)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-purple.svg)](https://github.com/langchain-ai/langgraph)
 
@@ -27,11 +27,12 @@
                       └────────┬─────────┘
                                │
                                ▼
-                      ┌──────────────────┐
-                      │   Specialists    │
-                      │  (Parallel via   │
-                      │ ThreadPoolExec.) │
-                      └────────┬─────────┘
+                       ┌──────────────────┐
+                       │   Specialists    │
+                       │  (Sequential by  │
+                       │  default; config │
+                       │  via env var)    │
+                       └────────┬─────────┘
                                │
                                ▼
                       ┌──────────────────┐
@@ -66,7 +67,7 @@ The system implements a **9-node LangGraph StateGraph** with a conditional debat
 
 1. **Ingestion** -- Validates patient state, resets counters
 2. **Supervisor Route** -- Analyzes case and selects relevant specialists
-3. **Specialist** -- Runs activated specialist agents in parallel via `ThreadPoolExecutor`
+3. **Specialist** -- Runs activated specialist agents sequentially by default (configurable via `COUNCIL_MAX_WORKERS`)
 4. **Safety Check** -- Scans all specialist outputs for red flags (suicide risk, sepsis, cardiac arrest, etc.)
 5. **Emergency Synthesis** -- Produces emergency override plan when red flags detected (terminates graph)
 6. **Conflict Check** -- Detects contradictions between specialist outputs
@@ -197,7 +198,7 @@ The pipeline uses sliding-window chunking with configurable overlap and attaches
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock (367 tests) |
+| Testing | pytest + unittest.mock (400 tests) |
 
 ---
 
@@ -281,7 +282,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all 367 tests (< 2 seconds, no GPU needed)
+# Run all 400 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -460,19 +461,21 @@ BitsAndBytesConfig(
 
 The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_USE_REAL_MODELS` env var). In mock mode (default), no GPU is needed. In real mode, models are loaded with automatic tensor parallelism via `accelerate`.
 
+**GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the 27B model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. `TextModelWrapper` truncates input prompts to `max_input_tokens=4096` to bound KV cache allocation.
+
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (367 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (400 tests) completes in < 2 seconds.
 
 ---
 
-## Parallel Specialist Execution
+## Specialist Execution
 
-Specialist agents run concurrently via `ThreadPoolExecutor` for faster case analysis. Each specialist runs in its own thread with fault isolation -- if one specialist fails, the others still complete.
+Specialist agents run via `ThreadPoolExecutor` with fault isolation -- if one specialist fails, the others still complete.
 
 Configuration:
-- Default `max_workers` = number of activated specialists
-- Override via `COUNCIL_MAX_WORKERS` environment variable
+- Default `max_workers` = 1 (sequential execution to prevent CUDA OOM on limited-VRAM GPUs)
+- Override via `COUNCIL_MAX_WORKERS` environment variable (e.g., set to 3 for parallelism on larger GPUs)
 - Individual specialist timeouts produce error entries (not crashes)
 
 ---
