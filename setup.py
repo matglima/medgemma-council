@@ -17,6 +17,7 @@ setup(
         "llama-index>=0.10.0",
         "chromadb>=0.4.0",
         "biopython>=1.83",
+        "bitsandbytes>=0.41.0",
         "pydantic>=2.0.0",
         # 'llama-cpp-python' is installed separately with hardware-specific flags
     ],
