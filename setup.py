@@ -14,6 +14,7 @@ setup(
         "streamlit>=1.30.0",
         "torch>=2.1.0",
         "transformers>=4.38.0",
+        "accelerate>=0.25.0",
         "llama-index>=0.10.0",
         "chromadb>=0.4.0",
         "biopython>=1.83",
