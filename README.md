@@ -1,7 +1,7 @@
 # MedGemma-Council
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-450%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-451%20passing-brightgreen.svg)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-purple.svg)](https://github.com/langchain-ai/langgraph)
 
@@ -198,7 +198,7 @@ The pipeline uses sliding-window chunking with configurable overlap and attaches
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock (450 tests) |
+| Testing | pytest + unittest.mock (451 tests) |
 
 ---
 
@@ -282,7 +282,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all 450 tests (< 2 seconds, no GPU needed)
+# Run all 451 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -533,7 +533,7 @@ The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_U
 
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (450 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (451 tests) completes in < 2 seconds.
 
 ---
 
