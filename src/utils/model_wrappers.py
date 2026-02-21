@@ -71,6 +71,11 @@ class TextModelWrapper:
             Dict in llama-cpp format with generated text.
         """
         try:
+            logger.debug(
+                f"TextModelWrapper: prompt={len(prompt)} chars, "
+                f"max_tokens={max_tokens}, max_input_tokens={self.max_input_tokens}"
+            )
+
             # 1a. Apply chat template with tokenization in a single step.
             #     Using tokenize=True with truncation lets the chat template engine
             #     handle truncation *while preserving structural markers* like
@@ -151,6 +156,11 @@ class TextModelWrapper:
 
             input_len = input_ids.shape[1]
 
+            logger.debug(
+                f"TextModelWrapper: input_tokens={input_len}, "
+                f"path={'chat_template(tokenize=True)' if used_chat_template_tokenize else 'fallback string tokenization'}"
+            )
+
             # 2. Generate (greedy decoding by default to avoid sampling-mode
             #    amplification of numerical errors from 4-bit dequantization)
             generate_kwargs = {"do_sample": False}
@@ -175,6 +185,10 @@ class TextModelWrapper:
 
             # 4. Decode generated tokens
             text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+            logger.debug(
+                f"TextModelWrapper: output_preview={text[:200]!r}"
+            )
 
             return {"choices": [{"text": text}]}
 
@@ -220,6 +234,11 @@ class VisionModelWrapper:
             return [{"generated_text": "Error: No images provided for analysis."}]
 
         try:
+            logger.debug(
+                f"VisionModelWrapper: images={len(images)}, "
+                f"prompt={len(prompt)} chars"
+            )
+
             # Format the prompt as chat messages with image entries.
             # MedGemma 4B IT's processor expects {"type": "image"} entries
             # in the message content — one per image — so it can insert
@@ -236,6 +255,15 @@ class VisionModelWrapper:
                 max_new_tokens=max_new_tokens,
                 **kwargs,
             )
+
+            # Log output preview
+            if isinstance(result, list) and result:
+                preview = str(result[0].get("generated_text", ""))[:200]
+            elif isinstance(result, dict):
+                preview = str(result.get("generated_text", ""))[:200]
+            else:
+                preview = str(result)[:200]
+            logger.debug(f"VisionModelWrapper: output_preview={preview!r}")
 
             # Normalize output to list format
             if isinstance(result, list):

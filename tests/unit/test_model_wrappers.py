@@ -963,3 +963,141 @@ class TestMockModelWrapper:
 
         assert isinstance(result, dict)
         assert "choices" in result
+
+
+class TestTextModelWrapperLogging:
+    """Tests for verbose logging in TextModelWrapper.__call__()."""
+
+    def test_logs_prompt_length_in_chars(self):
+        """TextModelWrapper should log the prompt length in characters."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+
+        with patch("utils.model_wrappers.logger") as mock_logger:
+            wrapper("Test prompt for logging", max_tokens=100)
+
+        # Should have logged the prompt length
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_info_calls = [str(c) for c in mock_logger.info.call_args_list]
+        all_log_text = " ".join(all_debug_calls + all_info_calls)
+        assert "23" in all_log_text or "char" in all_log_text.lower()
+
+    def test_logs_input_token_count(self):
+        """TextModelWrapper should log the number of input tokens."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 42)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        # .to() must return a tensor with the same shape so input_len resolves
+        fake_input_ids.to.return_value = fake_input_ids
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+
+        with patch("utils.model_wrappers.logger") as mock_logger:
+            wrapper("Test prompt", max_tokens=100)
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_info_calls = [str(c) for c in mock_logger.info.call_args_list]
+        all_log_text = " ".join(all_debug_calls + all_info_calls)
+        assert "42" in all_log_text  # 42 input tokens
+
+    def test_logs_generated_output_preview(self):
+        """TextModelWrapper should log a preview of the generated text."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "The patient has pneumonia"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+
+        with patch("utils.model_wrappers.logger") as mock_logger:
+            wrapper("Test prompt", max_tokens=100)
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_log_text = " ".join(all_debug_calls)
+        assert "pneumonia" in all_log_text or "patient" in all_log_text
+
+    def test_logs_which_template_path_was_used(self):
+        """TextModelWrapper should log whether chat_template(tokenize=True) or fallback was used."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+
+        with patch("utils.model_wrappers.logger") as mock_logger:
+            wrapper("Test prompt", max_tokens=100)
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_log_text = " ".join(all_debug_calls)
+        assert "chat_template" in all_log_text.lower() or "tokenize" in all_log_text.lower()
+
+
+class TestVisionModelWrapperLogging:
+    """Tests for verbose logging in VisionModelWrapper.__call__()."""
+
+    def test_logs_image_count(self):
+        """VisionModelWrapper should log the number of images."""
+        from utils.model_wrappers import VisionModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [{"generated_text": "findings"}]
+
+        wrapper = VisionModelWrapper(pipeline=mock_pipeline)
+
+        with patch("utils.model_wrappers.logger") as mock_logger:
+            wrapper(images=["img1.png", "img2.png"], prompt="Analyze.")
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_info_calls = [str(c) for c in mock_logger.info.call_args_list]
+        all_log_text = " ".join(all_debug_calls + all_info_calls)
+        assert "2" in all_log_text  # 2 images
+
+    def test_logs_output_preview(self):
+        """VisionModelWrapper should log a preview of the generated text."""
+        from utils.model_wrappers import VisionModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [{"generated_text": "Consolidation in left lower lobe"}]
+
+        wrapper = VisionModelWrapper(pipeline=mock_pipeline)
+
+        with patch("utils.model_wrappers.logger") as mock_logger:
+            wrapper(images=["img.png"], prompt="Analyze.")
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_log_text = " ".join(all_debug_calls)
+        assert "consolidation" in all_log_text.lower() or "lobe" in all_log_text.lower()
