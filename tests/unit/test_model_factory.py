@@ -141,3 +141,47 @@ class TestModelFactory:
             model = factory.create_vision_model()
 
         assert isinstance(model, MagicMock)  # It's a MagicMock with VisionModelWrapper spec
+
+
+class TestVerifyQuantization:
+    """Tests for post-load quantization verification."""
+
+    def test_verify_quantization_warns_when_not_quantized(self):
+        """Should log warning if model does not appear quantized after loading."""
+        from utils.model_factory import _verify_quantization
+
+        mock_model = MagicMock()
+        mock_model.is_quantized = False
+
+        with patch("utils.model_factory.logger") as mock_logger:
+            _verify_quantization(mock_model, "test-model")
+
+        mock_logger.warning.assert_called()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "not quantized" in warning_msg.lower() or "NOT quantized" in warning_msg
+
+    def test_verify_quantization_logs_info_when_quantized(self):
+        """Should log info (not warning) when model is properly quantized."""
+        from utils.model_factory import _verify_quantization
+
+        mock_model = MagicMock()
+        mock_model.is_quantized = True
+
+        with patch("utils.model_factory.logger") as mock_logger:
+            _verify_quantization(mock_model, "test-model")
+
+        mock_logger.warning.assert_not_called()
+        mock_logger.info.assert_called()
+
+    def test_verify_quantization_handles_missing_attribute(self):
+        """Should handle models without is_quantized attribute gracefully."""
+        from utils.model_factory import _verify_quantization
+
+        mock_model = MagicMock(spec=[])  # No attributes
+
+        with patch("utils.model_factory.logger") as mock_logger:
+            # Should not raise
+            _verify_quantization(mock_model, "test-model")
+
+        # Should log a warning since we can't confirm quantization
+        mock_logger.warning.assert_called()
