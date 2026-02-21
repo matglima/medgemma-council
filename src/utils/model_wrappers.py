@@ -71,11 +71,28 @@ class TextModelWrapper:
             Dict in llama-cpp format with generated text.
         """
         try:
-            # 1. Tokenize the prompt (with truncation to prevent OOM)
+            # 1a. Apply chat template if the tokenizer supports it.
+            #     Instruction-tuned models (e.g. MedGemma-27B-text-it / Gemma 2 IT)
+            #     expect <start_of_turn>user/model markers.  Without the template
+            #     the model doesn't know where to start generating → EOS immediately
+            #     → empty specialist outputs.
+            formatted_prompt = prompt
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                formatted_prompt = self.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            except Exception:
+                # Tokenizer lacks chat template support — use raw prompt
+                formatted_prompt = prompt
+
+            # 1b. Tokenize the (formatted) prompt (with truncation to prevent OOM)
             if self.device == "auto":
                 # Let the model's device map handle tensor placement
                 inputs = self.tokenizer(
-                    prompt,
+                    formatted_prompt,
                     return_tensors="pt",
                     truncation=True,
                     max_length=self.max_input_tokens,
@@ -87,7 +104,7 @@ class TextModelWrapper:
                     }
             else:
                 inputs = self.tokenizer(
-                    prompt,
+                    formatted_prompt,
                     return_tensors="pt",
                     truncation=True,
                     max_length=self.max_input_tokens,
@@ -99,6 +116,12 @@ class TextModelWrapper:
             # 2. Generate (greedy decoding by default to avoid sampling-mode
             #    amplification of numerical errors from 4-bit dequantization)
             generate_kwargs = {"do_sample": False}
+            # Pass pad_token_id explicitly to suppress the
+            # "Setting pad_token_id to eos_token_id" warning.
+            # model.generate() checks generation_config.pad_token_id,
+            # not the tokenizer, so we must pass it in kwargs.
+            if self.tokenizer.pad_token_id is not None:
+                generate_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
             generate_kwargs.update(kwargs)  # allow callers to override
             output_ids = self.model.generate(
                 **inputs,
