@@ -1,7 +1,7 @@
 # MedGemma-Council
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-400%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-407%20passing-brightgreen.svg)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-purple.svg)](https://github.com/langchain-ai/langgraph)
 
@@ -198,7 +198,7 @@ The pipeline uses sliding-window chunking with configurable overlap and attaches
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock (400 tests) |
+| Testing | pytest + unittest.mock (407 tests) |
 
 ---
 
@@ -282,7 +282,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all 400 tests (< 2 seconds, no GPU needed)
+# Run all 407 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -454,18 +454,20 @@ Quantization config:
 BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_compute_dtype=torch.float16,  # auto-selected: float16 for T4, bfloat16 for Ampere+
 )
 # Memory budget: max_memory={0: "14GiB", 1: "14GiB"}
 ```
 
+> **Note:** The compute dtype is automatically overridden based on GPU compute capability. T4 GPUs (CC 7.5) use `float16` because bfloat16 4-bit dequantization produces inf/nan logits on hardware without native bfloat16 tensor cores. Ampere+ GPUs (CC >= 8.0) use `bfloat16`.
+
 The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_USE_REAL_MODELS` env var). In mock mode (default), no GPU is needed. In real mode, models are loaded with automatic tensor parallelism via `accelerate`.
 
-**GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the 27B model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. `TextModelWrapper` truncates input prompts to `max_input_tokens=4096` to bound KV cache allocation.
+**GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the 27B model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. `TextModelWrapper` truncates input prompts to `max_input_tokens=4096` to bound KV cache allocation. Generation uses greedy decoding (`do_sample=False`) by default to prevent sampling-mode amplification of numerical errors.
 
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (400 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (407 tests) completes in < 2 seconds.
 
 ---
 
