@@ -848,6 +848,74 @@ class TestVisionModelWrapper:
         assert call_kwargs.kwargs.get("max_new_tokens") == 512 or \
                (len(call_kwargs.args) > 0 or "max_new_tokens" in str(call_kwargs))
 
+    # -----------------------------------------------------------------------
+    # Chat-format input for MedGemma 4B (Fix #8: image token mismatch)
+    # -----------------------------------------------------------------------
+
+    def test_formats_prompt_as_chat_messages_with_images(self):
+        """VisionModelWrapper should format the prompt as chat messages with
+        {"type": "image"} entries for each image, so MedGemma 4B's processor
+        can match images to <image> tokens.
+
+        The error "Prompt contained 0 image tokens but received 2 images" occurs
+        when the prompt is passed as a plain string without image placeholders.
+        """
+        from utils.model_wrappers import VisionModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [{"generated_text": "findings"}]
+
+        wrapper = VisionModelWrapper(pipeline=mock_pipeline)
+        wrapper(images=["img1.png", "img2.png"], prompt="Compare these images.")
+
+        call_kwargs = mock_pipeline.call_args
+        # The text kwarg should be a list of messages (chat format)
+        text_arg = call_kwargs.kwargs.get("text")
+        assert isinstance(text_arg, list), f"Expected list of messages, got {type(text_arg)}"
+        assert len(text_arg) == 1  # Single user message
+        msg = text_arg[0]
+        assert msg["role"] == "user"
+
+        # Content should have image entries + text entry
+        content = msg["content"]
+        assert isinstance(content, list)
+        image_entries = [c for c in content if c.get("type") == "image"]
+        text_entries = [c for c in content if c.get("type") == "text"]
+        assert len(image_entries) == 2  # One per image
+        assert len(text_entries) == 1
+        assert text_entries[0]["text"] == "Compare these images."
+
+    def test_single_image_formats_one_image_entry(self):
+        """For a single image, only one {"type": "image"} entry should be present."""
+        from utils.model_wrappers import VisionModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [{"generated_text": "findings"}]
+
+        wrapper = VisionModelWrapper(pipeline=mock_pipeline)
+        wrapper(images=["single.png"], prompt="Analyze this image.")
+
+        call_kwargs = mock_pipeline.call_args
+        text_arg = call_kwargs.kwargs.get("text")
+        assert isinstance(text_arg, list)
+        content = text_arg[0]["content"]
+        image_entries = [c for c in content if c.get("type") == "image"]
+        assert len(image_entries) == 1
+
+    def test_images_passed_to_pipeline_kwarg(self):
+        """The images should still be passed via the images= kwarg."""
+        from utils.model_wrappers import VisionModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [{"generated_text": "findings"}]
+
+        images = ["img1.png", "img2.png"]
+        wrapper = VisionModelWrapper(pipeline=mock_pipeline)
+        wrapper(images=images, prompt="Analyze.")
+
+        call_kwargs = mock_pipeline.call_args
+        assert call_kwargs.kwargs.get("images") == images
+
 
 class TestMockModelWrapper:
     """Tests for the MockModelWrapper used in testing/development."""

@@ -220,9 +220,19 @@ class VisionModelWrapper:
             return [{"generated_text": "Error: No images provided for analysis."}]
 
         try:
+            # Format the prompt as chat messages with image entries.
+            # MedGemma 4B IT's processor expects {"type": "image"} entries
+            # in the message content — one per image — so it can insert
+            # <image> tokens in the right places.  Without these entries
+            # the processor raises:
+            #   "Prompt contained 0 image tokens but received N images."
+            content = [{"type": "image"} for _ in images]
+            content.append({"type": "text", "text": prompt})
+            messages = [{"role": "user", "content": content}]
+
             result = self.pipeline(
                 images=images,
-                text=prompt,
+                text=messages,
                 max_new_tokens=max_new_tokens,
                 **kwargs,
             )
