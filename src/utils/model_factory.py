@@ -19,7 +19,7 @@ All returned models conform to the agent callable interface:
 
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ class ModelFactory:
 
     def create_text_model(
         self,
-        model_id: str = DEFAULT_TEXT_MODEL_ID,
+        model_id: Optional[str] = None,
     ) -> Any:
         """
         Create or retrieve a cached text model (MedGemma 27B).
@@ -118,12 +118,27 @@ class ModelFactory:
         model_id return the same object — critical for avoiding CUDA OOM when
         multiple graph nodes each instantiate a ModelFactory.
 
+        Model ID resolution order:
+            1. Explicit ``model_id`` argument (if provided)
+            2. ``MEDGEMMA_TEXT_MODEL_ID`` environment variable
+            3. ``DEFAULT_TEXT_MODEL_ID`` constant
+
         Args:
-            model_id: HuggingFace model ID.
+            model_id: HuggingFace model ID. When *None*, falls back to the
+                ``MEDGEMMA_TEXT_MODEL_ID`` env var, then the built-in default.
 
         Returns:
             A callable model wrapper conforming to the agent interface.
         """
+        if model_id is None:
+            model_id = os.environ.get(
+                "MEDGEMMA_TEXT_MODEL_ID", DEFAULT_TEXT_MODEL_ID
+            )
+            logger.debug(
+                f"Resolved text model_id to '{model_id}' "
+                f"(env var {'set' if 'MEDGEMMA_TEXT_MODEL_ID' in os.environ else 'not set'})"
+            )
+
         cache_key = f"text:{model_id}"
 
         if cache_key in ModelFactory._model_cache:

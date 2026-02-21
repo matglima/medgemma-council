@@ -428,3 +428,57 @@ class TestLoadRealTextModelPadToken:
 
         # Existing pad_token should be preserved
         assert mock_tokenizer.pad_token == "<pad>"
+
+
+class TestTextModelIdEnvVar:
+    """Tests for MEDGEMMA_TEXT_MODEL_ID env var override.
+
+    TDD: Written BEFORE the implementation.
+
+    When MEDGEMMA_TEXT_MODEL_ID is set, create_text_model() should use that
+    model ID instead of the default, unless an explicit model_id argument
+    is provided (which takes precedence).
+    """
+
+    def setup_method(self):
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+
+    def teardown_method(self):
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+
+    def test_env_var_overrides_default_model_id(self):
+        """MEDGEMMA_TEXT_MODEL_ID env var should override the default model ID."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {
+            "MEDGEMMA_TEXT_MODEL_ID": "google/medgemma-4b-it",
+        }, clear=True):
+            factory = ModelFactory()
+            model = factory.create_text_model()
+
+        # Cache key should use the env var model ID, not the default
+        assert "text:google/medgemma-4b-it" in ModelFactory._model_cache
+
+    def test_explicit_model_id_takes_precedence_over_env_var(self):
+        """An explicit model_id argument should take precedence over the env var."""
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {
+            "MEDGEMMA_TEXT_MODEL_ID": "google/medgemma-4b-it",
+        }, clear=True):
+            factory = ModelFactory()
+            model = factory.create_text_model(model_id="custom/model")
+
+        assert "text:custom/model" in ModelFactory._model_cache
+
+    def test_default_used_when_no_env_var(self):
+        """When MEDGEMMA_TEXT_MODEL_ID is not set, the default should be used."""
+        from utils.model_factory import ModelFactory, DEFAULT_TEXT_MODEL_ID
+
+        with patch.dict(os.environ, {}, clear=True):
+            factory = ModelFactory()
+            model = factory.create_text_model()
+
+        assert f"text:{DEFAULT_TEXT_MODEL_ID}" in ModelFactory._model_cache
