@@ -143,16 +143,19 @@ def _run_single_specialist(
 
 def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
     """
-    Run activated specialist agents **in parallel** and collect their outputs.
+    Run activated specialist agents and collect their outputs.
     Isolated for mocking in tests.
 
     Uses ``concurrent.futures.ThreadPoolExecutor`` so that specialist LLM
-    calls (which are I/O-bound when hitting a remote model or waiting for
-    GPU batch slots) overlap instead of running sequentially.
+    calls can overlap when parallelism is explicitly enabled.
+
+    By default, specialists run **sequentially** (max_workers=1) to prevent
+    CUDA OOM from concurrent model.generate() calls on limited-VRAM GPUs
+    (e.g. 2xT4 with 14.6 GiB each).
 
     Configuration:
         COUNCIL_MAX_WORKERS (env var): Override the default thread-pool size.
-            Defaults to the number of activated specialists.
+            Defaults to 1 (sequential). Set to N to run N specialists in parallel.
 
     Parses the supervisor's routing output to determine which specialists
     to instantiate and run.
@@ -192,8 +195,11 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
     llm = factory.create_text_model()
 
     # Determine thread-pool size
+    # Default to sequential (max_workers=1) to prevent CUDA OOM from
+    # concurrent model.generate() calls on limited-VRAM GPUs (e.g. 2xT4).
+    # Use COUNCIL_MAX_WORKERS env var to re-enable parallelism on larger GPUs.
     env_workers = os.environ.get("COUNCIL_MAX_WORKERS")
-    max_workers = int(env_workers) if env_workers else len(activated)
+    max_workers = int(env_workers) if env_workers else 1
 
     outputs: Dict[str, str] = {}
 

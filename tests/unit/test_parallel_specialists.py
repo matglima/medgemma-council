@@ -224,7 +224,7 @@ class TestMaxWorkersConfig:
 
     @patch("graph.ModelFactory")
     def test_default_max_workers_equals_activated_count(self, MockFactory):
-        """Without env var, max_workers should equal the number of activated specialists."""
+        """Without env var, max_workers should default to 1 (sequential) to prevent CUDA OOM."""
         from graph import _run_specialists
 
         mock_factory_inst = MagicMock()
@@ -254,10 +254,10 @@ class TestMaxWorkersConfig:
 
                 _run_specialists(state)
 
-            # ThreadPoolExecutor was called with max_workers=2 (2 activated specialists)
+            # Default max_workers=1 (sequential) to prevent CUDA OOM from parallel generate() calls
             call_kwargs = MockTPE.call_args
             max_workers = call_kwargs[1].get("max_workers") if call_kwargs[1] else call_kwargs[0][0]
-            assert max_workers == 2
+            assert max_workers == 1
 
     @patch("graph.ModelFactory")
     def test_env_var_overrides_max_workers(self, MockFactory):
