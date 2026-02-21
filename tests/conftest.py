@@ -5,8 +5,29 @@ CRITICAL: These fixtures mock all heavy compute (LLM inference, vision models)
 so that tests never load real 27B/4B parameter models. Tests must run in <10s.
 """
 
+import os
 import pytest
 from unittest.mock import MagicMock, patch
+
+
+@pytest.fixture(scope="session", autouse=True)
+def force_mock_models():
+    """
+    Ensure tests NEVER load real models, even if MEDGEMMA_USE_REAL_MODELS=true
+    is set in the environment (e.g., on Kaggle).
+
+    This fixture runs automatically before all tests and forces mock mode.
+    """
+    # Save original value
+    original = os.environ.get("MEDGEMMA_USE_REAL_MODELS", None)
+    # Force mock mode for tests
+    os.environ["MEDGEMMA_USE_REAL_MODELS"] = "false"
+    yield
+    # Restore original value after tests
+    if original is not None:
+        os.environ["MEDGEMMA_USE_REAL_MODELS"] = original
+    else:
+        os.environ.pop("MEDGEMMA_USE_REAL_MODELS", None)
 
 
 @pytest.fixture
