@@ -71,60 +71,101 @@ class TextModelWrapper:
             Dict in llama-cpp format with generated text.
         """
         try:
-            # 1a. Apply chat template if the tokenizer supports it.
-            #     Instruction-tuned models (e.g. MedGemma-27B-text-it / Gemma 2 IT)
-            #     expect <start_of_turn>user/model markers.  Without the template
-            #     the model doesn't know where to start generating → EOS immediately
-            #     → empty specialist outputs.
-            formatted_prompt = prompt
+            # 1a. Apply chat template with tokenization in a single step.
+            #     Using tokenize=True with truncation lets the chat template engine
+            #     handle truncation *while preserving structural markers* like
+            #     <end_of_turn> and <start_of_turn>model.  The old approach
+            #     (tokenize=False → string → tokenizer(truncation=True)) truncated
+            #     from the right, cutting off the model-turn markers that instruct
+            #     the model to begin generation → empty specialist outputs.
+            messages = [{"role": "user", "content": prompt}]
+            input_ids = None
+            used_chat_template_tokenize = False
+
             try:
-                messages = [{"role": "user", "content": prompt}]
-                formatted_prompt = self.tokenizer.apply_chat_template(
+                input_ids = self.tokenizer.apply_chat_template(
                     messages,
-                    tokenize=False,
+                    tokenize=True,
+                    truncation=True,
+                    max_length=self.max_input_tokens,
+                    return_tensors="pt",
                     add_generation_prompt=True,
                 )
+                used_chat_template_tokenize = True
             except Exception:
-                # Tokenizer lacks chat template support — use raw prompt
+                # Fallback: tokenizer doesn't support truncation/return_tensors
+                # in apply_chat_template.  Try string-based approach.
+                pass
+
+            if not used_chat_template_tokenize:
+                # Fallback path A: apply_chat_template(tokenize=False) -> string
                 formatted_prompt = prompt
+                try:
+                    formatted_prompt = self.tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+                except Exception:
+                    # Tokenizer lacks chat template support entirely — use raw prompt
+                    formatted_prompt = prompt
 
-            # 1b. Tokenize the (formatted) prompt (with truncation to prevent OOM)
-            if self.device == "auto":
-                # Let the model's device map handle tensor placement
-                inputs = self.tokenizer(
-                    formatted_prompt,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=self.max_input_tokens,
-                )
-                # Move inputs to the model's device if possible
-                if hasattr(self.model, "device"):
-                    inputs = {
-                        k: v.to(self.model.device) for k, v in inputs.items()
-                    }
+                # Tokenize the string (with truncation, may lose structural markers)
+                if self.device == "auto":
+                    tok_out = self.tokenizer(
+                        formatted_prompt,
+                        return_tensors="pt",
+                        truncation=True,
+                        max_length=self.max_input_tokens,
+                    )
+                    if hasattr(self.model, "device"):
+                        tok_out = {
+                            k: v.to(self.model.device) for k, v in tok_out.items()
+                        }
+                else:
+                    tok_out = self.tokenizer(
+                        formatted_prompt,
+                        return_tensors="pt",
+                        truncation=True,
+                        max_length=self.max_input_tokens,
+                    )
+                    tok_out = {k: v.to(self.device) for k, v in tok_out.items()}
+
+                input_ids = tok_out["input_ids"]
+                attention_mask = tok_out.get("attention_mask")
             else:
-                inputs = self.tokenizer(
-                    formatted_prompt,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=self.max_input_tokens,
-                )
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                # We got token IDs directly from apply_chat_template.
+                # Move to model device and build attention_mask.
+                if self.device == "auto":
+                    if hasattr(self.model, "device"):
+                        input_ids = input_ids.to(self.model.device)
+                else:
+                    input_ids = input_ids.to(self.device)
 
-            input_len = inputs["input_ids"].shape[1]
+                # Create attention_mask of all 1s (no padding in this path)
+                try:
+                    import torch
+                    attention_mask = torch.ones_like(input_ids)
+                except ImportError:
+                    attention_mask = None
+
+            input_len = input_ids.shape[1]
 
             # 2. Generate (greedy decoding by default to avoid sampling-mode
             #    amplification of numerical errors from 4-bit dequantization)
             generate_kwargs = {"do_sample": False}
             # Pass pad_token_id explicitly to suppress the
             # "Setting pad_token_id to eos_token_id" warning.
-            # model.generate() checks generation_config.pad_token_id,
-            # not the tokenizer, so we must pass it in kwargs.
             if self.tokenizer.pad_token_id is not None:
                 generate_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
             generate_kwargs.update(kwargs)  # allow callers to override
+
+            gen_inputs = {"input_ids": input_ids}
+            if attention_mask is not None:
+                gen_inputs["attention_mask"] = attention_mask
+
             output_ids = self.model.generate(
-                **inputs,
+                **gen_inputs,
                 max_new_tokens=max_tokens,
                 **generate_kwargs,
             )

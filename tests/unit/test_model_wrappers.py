@@ -77,7 +77,9 @@ class TestTextModelWrapper:
         assert isinstance(result["choices"][0]["text"], str)
 
     def test_call_invokes_tokenizer_encode(self):
-        """Calling the wrapper should tokenize the (formatted) prompt."""
+        """Calling the wrapper should tokenize the prompt (via apply_chat_template
+        or fallback to tokenizer __call__ if chat template tokenization fails).
+        """
         from utils.model_wrappers import TextModelWrapper
 
         mock_model = MagicMock()
@@ -88,17 +90,26 @@ class TestTextModelWrapper:
         mock_tokenizer.decode.return_value = "response"
         mock_model.generate.return_value = MagicMock()
 
-        # Set up chat template to return a known formatted string
-        formatted = "<start_of_turn>user\ntest prompt<end_of_turn>\n<start_of_turn>model\n"
-        mock_tokenizer.apply_chat_template.return_value = formatted
+        # Make apply_chat_template(tokenize=True) fail so it falls back to
+        # the string path where the tokenizer __call__ IS invoked.
+        call_count = [0]
+
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if kwargs.get("tokenize") is True:
+                raise TypeError("Not supported")
+            return "<start_of_turn>user\ntest prompt<end_of_turn>\n<start_of_turn>model\n"
+
+        mock_tokenizer.apply_chat_template.side_effect = side_effect
 
         wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
         wrapper("test prompt", max_tokens=100)
 
-        # Tokenizer should have been called with the formatted prompt
-        mock_tokenizer.assert_called_once()
-        call_args = mock_tokenizer.call_args
-        assert call_args[0][0] == formatted
+        # In the fallback path, tokenizer __call__ should be invoked
+        assert mock_tokenizer.call_count >= 1
+        # The formatted prompt should be passed to the tokenizer
+        tokenizer_call_args = mock_tokenizer.call_args
+        assert tokenizer_call_args[0][0] == "<start_of_turn>user\ntest prompt<end_of_turn>\n<start_of_turn>model\n"
 
     def test_call_invokes_model_generate(self):
         """Calling the wrapper should call model.generate with correct args."""
@@ -207,40 +218,52 @@ class TestTextModelWrapper:
         assert wrapper.device == "auto"
 
     def test_truncation_enabled_in_tokenizer_call(self):
-        """TextModelWrapper should pass truncation=True to the tokenizer."""
+        """TextModelWrapper should enable truncation (via apply_chat_template
+        or fallback to tokenizer __call__).
+        """
         from utils.model_wrappers import TextModelWrapper
 
         mock_model = MagicMock()
         mock_tokenizer = MagicMock()
-        mock_input_ids = MagicMock()
-        mock_input_ids.shape = [1, 10]
-        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+
+        # Primary path: apply_chat_template with tokenize=True
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.pad_token_id = 0
         mock_tokenizer.decode.return_value = "response"
         mock_model.generate.return_value = MagicMock()
 
         wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
         wrapper("test prompt", max_tokens=100)
 
-        call_kwargs = mock_tokenizer.call_args
-        assert call_kwargs.kwargs.get("truncation") is True
+        # truncation should be passed to apply_chat_template
+        call_kwargs = mock_tokenizer.apply_chat_template.call_args[1]
+        assert call_kwargs.get("truncation") is True
 
     def test_max_length_set_in_tokenizer_call(self):
-        """TextModelWrapper should pass max_length to the tokenizer to prevent unbounded prompts."""
+        """TextModelWrapper should pass max_length to truncation (via apply_chat_template
+        or fallback to tokenizer __call__).
+        """
         from utils.model_wrappers import TextModelWrapper
 
         mock_model = MagicMock()
         mock_tokenizer = MagicMock()
-        mock_input_ids = MagicMock()
-        mock_input_ids.shape = [1, 10]
-        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.pad_token_id = 0
         mock_tokenizer.decode.return_value = "response"
         mock_model.generate.return_value = MagicMock()
 
         wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
         wrapper("test prompt", max_tokens=100)
 
-        call_kwargs = mock_tokenizer.call_args
-        max_length = call_kwargs.kwargs.get("max_length")
+        call_kwargs = mock_tokenizer.apply_chat_template.call_args[1]
+        max_length = call_kwargs.get("max_length")
         assert max_length is not None
         assert isinstance(max_length, int)
         assert max_length > 0
@@ -266,14 +289,17 @@ class TestTextModelWrapper:
         assert wrapper.max_input_tokens == 2048
 
     def test_max_length_uses_max_input_tokens(self):
-        """The tokenizer max_length should equal the wrapper's max_input_tokens."""
+        """The max_length for truncation should equal the wrapper's max_input_tokens."""
         from utils.model_wrappers import TextModelWrapper
 
         mock_model = MagicMock()
         mock_tokenizer = MagicMock()
-        mock_input_ids = MagicMock()
-        mock_input_ids.shape = [1, 10]
-        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.pad_token_id = 0
         mock_tokenizer.decode.return_value = "response"
         mock_model.generate.return_value = MagicMock()
 
@@ -282,8 +308,8 @@ class TestTextModelWrapper:
         )
         wrapper("test prompt", max_tokens=100)
 
-        call_kwargs = mock_tokenizer.call_args
-        assert call_kwargs.kwargs.get("max_length") == 2048
+        call_kwargs = mock_tokenizer.apply_chat_template.call_args[1]
+        assert call_kwargs.get("max_length") == 2048
 
     def test_generate_uses_do_sample_false_by_default(self):
         """model.generate() should use do_sample=False by default (greedy decoding).
@@ -332,27 +358,25 @@ class TestTextModelWrapper:
 
     def test_applies_chat_template_when_available(self):
         """TextModelWrapper should use tokenizer.apply_chat_template() to format
-        the prompt before tokenization.
+        the prompt with proper structural markers.
 
         MedGemma-27B-text-it (Gemma 2 IT) expects <start_of_turn>user/model
         markers. Without the chat template, the model generates EOS immediately
-        → empty specialist outputs.
+        -> empty specialist outputs.
         """
         from utils.model_wrappers import TextModelWrapper
 
         mock_model = MagicMock()
         mock_tokenizer = MagicMock()
-        mock_input_ids = MagicMock()
-        mock_input_ids.shape = [1, 10]
-        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+        mock_tokenizer.pad_token_id = 0
+
+        # Simulate a tokenizer that supports chat templates with tokenization
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
         mock_tokenizer.decode.return_value = "response"
         mock_model.generate.return_value = MagicMock()
-
-        # Simulate a tokenizer that supports chat templates (like Gemma)
-        mock_tokenizer.apply_chat_template.return_value = (
-            "<start_of_turn>user\nWhat is the diagnosis?<end_of_turn>\n"
-            "<start_of_turn>model\n"
-        )
 
         wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
         wrapper("What is the diagnosis?", max_tokens=256)
@@ -367,14 +391,15 @@ class TestTextModelWrapper:
         assert messages[0]["role"] == "user"
         assert messages[0]["content"] == "What is the diagnosis?"
 
-        # Should request generation prompt
+        # Should request generation prompt and tokenize in one step
         assert call_args[1].get("add_generation_prompt") is True
-        # Should not tokenize (we do that separately)
-        assert call_args[1].get("tokenize") is False
+        assert call_args[1].get("tokenize") is True
+        assert call_args[1].get("truncation") is True
+        assert call_args[1].get("return_tensors") == "pt"
 
     def test_tokenizer_receives_formatted_prompt_from_chat_template(self):
-        """The tokenizer should receive the chat-template-formatted string,
-        not the raw prompt.
+        """When apply_chat_template(tokenize=True) fails, the fallback
+        string-based path should pass the formatted prompt to the tokenizer.
         """
         from utils.model_wrappers import TextModelWrapper
 
@@ -387,7 +412,13 @@ class TestTextModelWrapper:
         mock_model.generate.return_value = MagicMock()
 
         formatted = "<start_of_turn>user\nTest prompt<end_of_turn>\n<start_of_turn>model\n"
-        mock_tokenizer.apply_chat_template.return_value = formatted
+
+        def side_effect(*args, **kwargs):
+            if kwargs.get("tokenize") is True:
+                raise TypeError("Not supported")
+            return formatted
+
+        mock_tokenizer.apply_chat_template.side_effect = side_effect
 
         wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
         wrapper("Test prompt", max_tokens=100)
@@ -447,6 +478,213 @@ class TestTextModelWrapper:
         tokenizer_call_args = mock_tokenizer.call_args
         actual_prompt = tokenizer_call_args[0][0]
         assert actual_prompt == "Fallback prompt"
+
+    # -----------------------------------------------------------------------
+    # Truncation-safe chat template (Fix #6b: structural marker preservation)
+    # -----------------------------------------------------------------------
+
+    def test_apply_chat_template_tokenize_true_when_supported(self):
+        """TextModelWrapper should use apply_chat_template(tokenize=True) to get
+        token IDs directly, so truncation preserves structural markers.
+
+        The old approach: apply_chat_template(tokenize=False) -> string -> tokenizer(truncation=True)
+        truncated from the right, cutting off <end_of_turn><start_of_turn>model markers.
+
+        The new approach: apply_chat_template(tokenize=True, truncation=True, max_length=...)
+        lets the chat template engine handle truncation, preserving structural tokens.
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        # apply_chat_template(tokenize=True, return_tensors="pt") returns a
+        # tensor-like object with shape [1, seq_len]
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        wrapper("Test prompt", max_tokens=100)
+
+        # apply_chat_template should be called with tokenize=True
+        mock_tokenizer.apply_chat_template.assert_called_once()
+        call_kwargs = mock_tokenizer.apply_chat_template.call_args[1]
+        assert call_kwargs.get("tokenize") is True
+        assert call_kwargs.get("truncation") is True
+        assert call_kwargs.get("return_tensors") == "pt"
+        assert call_kwargs.get("add_generation_prompt") is True
+        assert "max_length" in call_kwargs
+
+    def test_apply_chat_template_max_length_matches_max_input_tokens(self):
+        """The max_length passed to apply_chat_template should equal max_input_tokens."""
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 5)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(
+            model=mock_model, tokenizer=mock_tokenizer, max_input_tokens=2048
+        )
+        wrapper("Test prompt", max_tokens=100)
+
+        call_kwargs = mock_tokenizer.apply_chat_template.call_args[1]
+        assert call_kwargs.get("max_length") == 2048
+
+    def test_tokenizer_not_called_separately_when_chat_template_tokenizes(self):
+        """When apply_chat_template(tokenize=True) succeeds, the tokenizer should
+        NOT be called separately to tokenize — we already have token IDs.
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 5)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        wrapper("Test prompt", max_tokens=100)
+
+        # The tokenizer __call__ should NOT have been invoked
+        # (apply_chat_template already returned token IDs)
+        mock_tokenizer.assert_not_called()
+
+    def test_fallback_to_string_tokenization_when_chat_template_tokenize_fails(self):
+        """If apply_chat_template(tokenize=True) fails (e.g., the tokenizer doesn't
+        support truncation in chat template), fall back to the old string-based approach:
+        apply_chat_template(tokenize=False) -> tokenizer(string, truncation=True).
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        # First call (tokenize=True) fails
+        # Second call (tokenize=False) succeeds with a string
+        call_count = [0]
+
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if kwargs.get("tokenize") is True:
+                raise TypeError("apply_chat_template() got unexpected keyword argument 'truncation'")
+            return "<start_of_turn>user\nTest<end_of_turn>\n<start_of_turn>model\n"
+
+        mock_tokenizer.apply_chat_template.side_effect = side_effect
+
+        mock_input_ids = MagicMock()
+        mock_input_ids.shape = [1, 10]
+        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        result = wrapper("Test prompt", max_tokens=100)
+
+        # Should have fallen back to string tokenization
+        assert "choices" in result
+        # The tokenizer __call__ should have been used as fallback
+        mock_tokenizer.assert_called_once()
+
+    def test_fallback_to_raw_prompt_when_all_chat_template_attempts_fail(self):
+        """If both apply_chat_template(tokenize=True) and apply_chat_template(tokenize=False)
+        fail, fall back to using the raw prompt with the tokenizer.
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        # All apply_chat_template calls fail
+        mock_tokenizer.apply_chat_template.side_effect = Exception("No chat template")
+
+        mock_input_ids = MagicMock()
+        mock_input_ids.shape = [1, 10]
+        mock_tokenizer.return_value = {"input_ids": mock_input_ids}
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        result = wrapper("Raw prompt", max_tokens=100)
+
+        # Should have fallen back to raw prompt tokenization
+        assert "choices" in result
+        tokenizer_call_args = mock_tokenizer.call_args
+        actual_prompt = tokenizer_call_args[0][0]
+        assert actual_prompt == "Raw prompt"
+
+    def test_input_ids_from_chat_template_passed_to_generate(self):
+        """When apply_chat_template(tokenize=True) succeeds, the resulting
+        input_ids should be passed directly to model.generate().
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 5)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        wrapper("Test prompt", max_tokens=100)
+
+        # model.generate should have received input_ids
+        call_kwargs = mock_model.generate.call_args
+        assert "input_ids" in call_kwargs.kwargs
+
+    def test_attention_mask_created_for_chat_template_input_ids(self):
+        """When using tokenized chat template output, an attention_mask of all 1s
+        should be created and passed to model.generate().
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 5)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        # Mock torch so ones_like is available even without torch installed
+        mock_torch = MagicMock()
+        mock_attention_mask = MagicMock()
+        mock_torch.ones_like.return_value = mock_attention_mask
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        with patch.dict("sys.modules", {"torch": mock_torch}):
+            wrapper("Test prompt", max_tokens=100)
+
+        call_kwargs = mock_model.generate.call_args
+        assert "attention_mask" in call_kwargs.kwargs
 
     # -----------------------------------------------------------------------
     # pad_token_id in generate kwargs (Fix #9: warning elimination)
