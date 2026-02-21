@@ -79,7 +79,11 @@ class SupervisorAgent(BaseAgent):
 
         Uses the LLM to analyze patient context and select relevant specialists.
         """
-        return self._determine_specialists(state)
+        specialists = self._determine_specialists(state)
+        logger.info(
+            f"SupervisorAgent.route: activated specialists={specialists}"
+        )
+        return specialists
 
     def detect_conflict(self, agent_outputs: Dict[str, str]) -> bool:
         """
@@ -91,7 +95,12 @@ class SupervisorAgent(BaseAgent):
         Returns:
             True if a conflict is detected, False otherwise.
         """
-        return self._check_conflict(agent_outputs)
+        result = self._check_conflict(agent_outputs)
+        logger.info(
+            f"SupervisorAgent.detect_conflict: conflict={result}, "
+            f"agents={list(agent_outputs.keys())}"
+        )
+        return result
 
     def synthesize(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -103,6 +112,7 @@ class SupervisorAgent(BaseAgent):
         Returns:
             State update with final_plan and consensus_reached=True.
         """
+        logger.info("SupervisorAgent.synthesize: generating final plan")
         plan = self._generate_plan(state)
         return {
             "final_plan": plan,

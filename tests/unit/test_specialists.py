@@ -8,7 +8,7 @@ Per MASTER_PROMPT: RAG-enabled, guideline-grounded agents.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 
 class TestCardiologyAgent:
@@ -489,3 +489,62 @@ class TestEndocrinologyAgent:
         agent = EndocrinologyAgent(llm=mock_llm)
         assert hasattr(agent, "enforce_diabetes_protocol")
         assert agent.enforce_diabetes_protocol is True
+
+
+class TestSpecialistLogging:
+    """Tests for verbose logging in _SpecialistAgent._run_inference()."""
+
+    def test_logs_prompt_length(self, mock_llm):
+        """_run_inference() should log the built prompt length in chars."""
+        from agents.specialists import CardiologyAgent
+
+        agent = CardiologyAgent(llm=mock_llm)
+
+        with patch("agents.specialists.logger") as mock_logger:
+            with patch.object(agent, "rag_tool") as mock_rag:
+                mock_rag.query.return_value = []
+                mock_rag.format_context.return_value = ""
+                agent._run_inference(
+                    patient_context={"chief_complaint": "chest pain", "age": 55},
+                )
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_log_text = " ".join(all_debug_calls)
+        assert "prompt" in all_log_text.lower() and "char" in all_log_text.lower()
+
+    def test_logs_rag_chunk_count(self, mock_llm):
+        """_run_inference() should log the number of RAG chunks retrieved."""
+        from agents.specialists import CardiologyAgent
+
+        agent = CardiologyAgent(llm=mock_llm)
+
+        fake_chunks = [{"text": "guideline 1"}, {"text": "guideline 2"}]
+        with patch("agents.specialists.logger") as mock_logger:
+            with patch.object(agent, "rag_tool") as mock_rag:
+                mock_rag.query.return_value = fake_chunks
+                mock_rag.format_context.return_value = "guideline 1\nguideline 2"
+                agent._run_inference(
+                    patient_context={"chief_complaint": "chest pain"},
+                )
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_log_text = " ".join(all_debug_calls)
+        assert "2" in all_log_text  # 2 RAG chunks
+
+    def test_logs_agent_name(self, mock_llm):
+        """_run_inference() should log which specialist is running."""
+        from agents.specialists import OncologyAgent
+
+        agent = OncologyAgent(llm=mock_llm)
+
+        with patch("agents.specialists.logger") as mock_logger:
+            with patch.object(agent, "rag_tool") as mock_rag:
+                mock_rag.query.return_value = []
+                mock_rag.format_context.return_value = ""
+                agent._run_inference(
+                    patient_context={"chief_complaint": "lung mass"},
+                )
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_log_text = " ".join(all_debug_calls)
+        assert "oncologyagent" in all_log_text.lower()

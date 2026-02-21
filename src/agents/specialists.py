@@ -85,7 +85,13 @@ class _SpecialistAgent(BaseAgent):
             rag_chunks = self.rag_tool.query(complaint, top_k=3)
             guideline_context = self.rag_tool.format_context(rag_chunks)
         except Exception:
+            rag_chunks = []
             guideline_context = ""
+
+        logger.debug(
+            f"{self.name}: RAG retrieved {len(rag_chunks)} chunks "
+            f"for complaint={complaint!r}"
+        )
 
         # 2. Build the inference prompt
         prompt_parts = [self.system_prompt, ""]
@@ -125,6 +131,11 @@ class _SpecialistAgent(BaseAgent):
         )
 
         prompt = "\n".join(prompt_parts)
+
+        logger.debug(
+            f"{self.name}: prompt={len(prompt)} chars, "
+            f"max_tokens=1024"
+        )
 
         # 3. Call the LLM
         result = self.llm(prompt, max_tokens=1024)

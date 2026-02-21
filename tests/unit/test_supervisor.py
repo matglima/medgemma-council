@@ -305,3 +305,86 @@ class TestSupervisorAgent:
                 result = agent.analyze(state)
 
         assert "agent_outputs" in result
+
+
+class TestSupervisorLogging:
+    """Tests for verbose logging in SupervisorAgent methods."""
+
+    def test_route_logs_activated_specialists(self, mock_llm):
+        """route() should log which specialists were activated."""
+        from agents.supervisor import SupervisorAgent
+
+        agent = SupervisorAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"chief_complaint": "chest pain"},
+            "medical_images": [],
+            "agent_outputs": {},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch("agents.supervisor.logger") as mock_logger:
+            with patch.object(
+                agent, "_determine_specialists",
+                return_value=["CardiologyAgent", "RadiologyAgent"],
+            ):
+                agent.route(state)
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_info_calls = [str(c) for c in mock_logger.info.call_args_list]
+        all_log_text = " ".join(all_debug_calls + all_info_calls)
+        assert "cardiologyagent" in all_log_text.lower()
+
+    def test_detect_conflict_logs_result(self, mock_llm):
+        """detect_conflict() should log whether conflict was found."""
+        from agents.supervisor import SupervisorAgent
+
+        agent = SupervisorAgent(llm=mock_llm)
+        agent_outputs = {
+            "CardiologyAgent": "Stop chemo.",
+            "OncologyAgent": "Continue chemo.",
+        }
+
+        with patch("agents.supervisor.logger") as mock_logger:
+            with patch.object(agent, "_check_conflict", return_value=True):
+                agent.detect_conflict(agent_outputs)
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_info_calls = [str(c) for c in mock_logger.info.call_args_list]
+        all_log_text = " ".join(all_debug_calls + all_info_calls)
+        assert "conflict" in all_log_text.lower()
+
+    def test_synthesize_logs_prompt_length(self, mock_llm):
+        """synthesize() should log the synthesis prompt length."""
+        from agents.supervisor import SupervisorAgent
+
+        agent = SupervisorAgent(llm=mock_llm)
+        state = {
+            "messages": [],
+            "patient_context": {"age": 65, "chief_complaint": "chest pain"},
+            "medical_images": [],
+            "agent_outputs": {"CardiologyAgent": "ACS workup."},
+            "debate_history": [],
+            "consensus_reached": False,
+            "research_findings": "",
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "final_plan": "",
+        }
+
+        with patch("agents.supervisor.logger") as mock_logger:
+            with patch.object(
+                agent, "_generate_plan",
+                return_value="Final plan text",
+            ):
+                agent.synthesize(state)
+
+        all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        all_info_calls = [str(c) for c in mock_logger.info.call_args_list]
+        all_log_text = " ".join(all_debug_calls + all_info_calls)
+        assert "synth" in all_log_text.lower()
