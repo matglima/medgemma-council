@@ -94,6 +94,7 @@ def run_council_cli(
     image_paths: Optional[List[str]] = None,
     verbose: bool = True,
     text_model_id: Optional[str] = None,
+    clear_model_cache: bool = False,
 ) -> Dict[str, Any]:
     """
     Run the MedGemma Council and return the full result state.
@@ -118,6 +119,9 @@ def run_council_cli(
             the MEDGEMMA_TEXT_MODEL_ID env var for ModelFactory.
             Use "google/medgemma-4b-it" for faster inference on
             limited hardware.
+        clear_model_cache: If True, clear the model cache before running.
+            Use this if you see CUDA errors (CUBLAS_STATUS_ALLOC_FAILED)
+            which indicate corrupted GPU state from a previous run.
 
     Returns:
         The final CouncilState dict after graph execution.
@@ -128,6 +132,21 @@ def run_council_cli(
         logger.debug("Verbose mode enabled — logging at DEBUG level")
     else:
         logging.basicConfig(level=logging.WARNING, force=True)
+
+    # Clear model cache if requested (for recovering from CUDA errors)
+    if clear_model_cache:
+        from utils.model_factory import ModelFactory
+        ModelFactory.clear_cache()
+        logger.info("Model cache cleared")
+        
+        # Also try to clear CUDA cache if available
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("CUDA cache cleared")
+        except ImportError:
+            pass
 
     # Set text model override env var if provided
     _env_was_set = False
