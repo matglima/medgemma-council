@@ -92,6 +92,8 @@ def run_council_cli(
     vitals: Optional[Dict[str, Any]] = None,
     labs: Optional[Dict[str, Any]] = None,
     image_paths: Optional[List[str]] = None,
+    verbose: bool = True,
+    text_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run the MedGemma Council and return the full result state.
@@ -108,10 +110,32 @@ def run_council_cli(
         vitals: Dict of vital signs.
         labs: Dict of lab values.
         image_paths: List of paths to medical images.
+        verbose: If True (default), configure logging to DEBUG level
+            for maximum visibility into model inference. If False,
+            set logging to WARNING.
+        text_model_id: Optional HuggingFace model ID to override the
+            default text model (google/medgemma-27b-text-it). Sets
+            the MEDGEMMA_TEXT_MODEL_ID env var for ModelFactory.
+            Use "google/medgemma-4b-it" for faster inference on
+            limited hardware.
 
     Returns:
         The final CouncilState dict after graph execution.
     """
+    # Configure logging based on verbose flag
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, force=True)
+        logger.debug("Verbose mode enabled — logging at DEBUG level")
+    else:
+        logging.basicConfig(level=logging.WARNING, force=True)
+
+    # Set text model override env var if provided
+    _env_was_set = False
+    if text_model_id is not None:
+        os.environ["MEDGEMMA_TEXT_MODEL_ID"] = text_model_id
+        _env_was_set = True
+        logger.info(f"Text model override: {text_model_id}")
+
     state = build_state(
         age=age,
         sex=sex,
@@ -134,6 +158,11 @@ def run_council_cli(
             "final_plan": f"Error: Council execution failed — {str(e)}",
             "consensus_reached": False,
         }
+    finally:
+        # Clean up env var to avoid leaking into subsequent calls
+        if _env_was_set:
+            os.environ.pop("MEDGEMMA_TEXT_MODEL_ID", None)
+            logger.debug("Cleaned up MEDGEMMA_TEXT_MODEL_ID env var")
 
 
 def format_result(result: Dict[str, Any], output_format: str = "text") -> str:
@@ -227,6 +256,8 @@ def main():
             "  python council_cli.py --age 65 --sex Male --complaint 'Chest pain'\n"
             "  python council_cli.py --age 5 --sex Female --complaint 'Fever and cough' --output json\n"
             "  python council_cli.py --age 45 --sex Male --complaint 'Skin lesion' --images img1.png img2.png\n"
+            "  python council_cli.py --age 65 --sex Male --complaint 'Chest pain' --model-id google/medgemma-4b-it\n"
+            "  python council_cli.py --age 65 --sex Male --complaint 'Chest pain' --quiet\n"
         ),
     )
     parser.add_argument("--age", type=int, required=True, help="Patient age in years")
@@ -236,14 +267,17 @@ def main():
     parser.add_argument("--medications", type=str, nargs="*", default=[], help="Current medications")
     parser.add_argument("--images", type=str, nargs="*", default=[], help="Paths to medical images")
     parser.add_argument("--output", type=str, choices=["text", "json"], default="text", help="Output format")
-    parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--model-id", type=str, default=None,
+        help="HuggingFace model ID for text inference (default: google/medgemma-27b-text-it). "
+             "Use google/medgemma-4b-it for faster inference on limited hardware.",
+    )
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Reduce logging to WARNING level (default is verbose/DEBUG)",
+    )
 
     args = parser.parse_args()
-
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.WARNING)
 
     result = run_council_cli(
         age=args.age,
@@ -252,6 +286,8 @@ def main():
         history=args.history,
         medications=args.medications,
         image_paths=args.images,
+        verbose=not args.quiet,
+        text_model_id=args.model_id,
     )
 
     print(format_result(result, output_format=args.output))

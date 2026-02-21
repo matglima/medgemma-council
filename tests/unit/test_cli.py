@@ -175,3 +175,239 @@ class TestFormatResult:
         output = format_result(result, "text")
         assert "DEBATE HISTORY" in output
         assert "Round 1" in output
+
+
+class TestVerboseFlag:
+    """Tests for verbose logging control in run_council_cli and main()."""
+
+    @patch("council_cli.build_council_graph")
+    def test_verbose_true_sets_debug_logging(self, mock_build):
+        """verbose=True should configure logging to DEBUG level."""
+        from council_cli import run_council_cli
+
+        mock_graph = MagicMock()
+        mock_graph.invoke.return_value = {
+            "messages": [], "patient_context": {}, "medical_images": [],
+            "agent_outputs": {}, "debate_history": [],
+            "consensus_reached": True, "research_findings": "",
+            "conflict_detected": False, "iteration_count": 0,
+            "final_plan": "Plan.",
+        }
+        mock_build.return_value = mock_graph
+
+        with patch("council_cli.logging") as mock_logging:
+            run_council_cli(
+                age=65, sex="Male", chief_complaint="Chest pain",
+                verbose=True,
+            )
+            mock_logging.basicConfig.assert_called()
+            call_kwargs = mock_logging.basicConfig.call_args
+            assert call_kwargs[1].get("level") == mock_logging.DEBUG or \
+                   (call_kwargs[0] and call_kwargs[0][0] == mock_logging.DEBUG)
+
+    @patch("council_cli.build_council_graph")
+    def test_verbose_false_sets_warning_logging(self, mock_build):
+        """verbose=False should configure logging to WARNING level."""
+        from council_cli import run_council_cli
+
+        mock_graph = MagicMock()
+        mock_graph.invoke.return_value = {
+            "messages": [], "patient_context": {}, "medical_images": [],
+            "agent_outputs": {}, "debate_history": [],
+            "consensus_reached": True, "research_findings": "",
+            "conflict_detected": False, "iteration_count": 0,
+            "final_plan": "Plan.",
+        }
+        mock_build.return_value = mock_graph
+
+        with patch("council_cli.logging") as mock_logging:
+            run_council_cli(
+                age=65, sex="Male", chief_complaint="Chest pain",
+                verbose=False,
+            )
+            mock_logging.basicConfig.assert_called()
+            call_kwargs = mock_logging.basicConfig.call_args
+            assert call_kwargs[1].get("level") == mock_logging.WARNING or \
+                   (call_kwargs[0] and call_kwargs[0][0] == mock_logging.WARNING)
+
+    @patch("council_cli.build_council_graph")
+    def test_verbose_defaults_to_true(self, mock_build):
+        """verbose should default to True (high verbosity by default)."""
+        from council_cli import run_council_cli
+
+        mock_graph = MagicMock()
+        mock_graph.invoke.return_value = {
+            "messages": [], "patient_context": {}, "medical_images": [],
+            "agent_outputs": {}, "debate_history": [],
+            "consensus_reached": True, "research_findings": "",
+            "conflict_detected": False, "iteration_count": 0,
+            "final_plan": "Plan.",
+        }
+        mock_build.return_value = mock_graph
+
+        # Don't pass verbose — should default to True (DEBUG)
+        with patch("council_cli.logging") as mock_logging:
+            run_council_cli(
+                age=65, sex="Male", chief_complaint="Chest pain",
+            )
+            mock_logging.basicConfig.assert_called()
+            call_kwargs = mock_logging.basicConfig.call_args
+            assert call_kwargs[1].get("level") == mock_logging.DEBUG or \
+                   (call_kwargs[0] and call_kwargs[0][0] == mock_logging.DEBUG)
+
+
+class TestTextModelIdFlag:
+    """Tests for text_model_id parameter in run_council_cli."""
+
+    @patch("council_cli.build_council_graph")
+    def test_text_model_id_sets_env_var(self, mock_build):
+        """text_model_id should set MEDGEMMA_TEXT_MODEL_ID env var."""
+        import os
+        from council_cli import run_council_cli
+
+        mock_graph = MagicMock()
+        mock_graph.invoke.return_value = {
+            "messages": [], "patient_context": {}, "medical_images": [],
+            "agent_outputs": {}, "debate_history": [],
+            "consensus_reached": True, "research_findings": "",
+            "conflict_detected": False, "iteration_count": 0,
+            "final_plan": "Plan.",
+        }
+        mock_build.return_value = mock_graph
+
+        # Capture the env var during graph.invoke
+        captured_env = {}
+        def capture_invoke(state):
+            captured_env["model_id"] = os.environ.get("MEDGEMMA_TEXT_MODEL_ID")
+            return mock_graph.invoke.return_value
+
+        mock_graph.invoke.side_effect = capture_invoke
+
+        run_council_cli(
+            age=65, sex="Male", chief_complaint="Chest pain",
+            text_model_id="google/medgemma-4b-it",
+        )
+
+        assert captured_env["model_id"] == "google/medgemma-4b-it"
+
+    @patch("council_cli.build_council_graph")
+    def test_text_model_id_none_does_not_set_env_var(self, mock_build):
+        """When text_model_id is None, MEDGEMMA_TEXT_MODEL_ID should not be set."""
+        import os
+        from council_cli import run_council_cli
+
+        mock_graph = MagicMock()
+        mock_graph.invoke.return_value = {
+            "messages": [], "patient_context": {}, "medical_images": [],
+            "agent_outputs": {}, "debate_history": [],
+            "consensus_reached": True, "research_findings": "",
+            "conflict_detected": False, "iteration_count": 0,
+            "final_plan": "Plan.",
+        }
+        mock_build.return_value = mock_graph
+
+        # Ensure it's not set before the call
+        env_backup = os.environ.pop("MEDGEMMA_TEXT_MODEL_ID", None)
+        try:
+            captured_env = {}
+            def capture_invoke(state):
+                captured_env["model_id"] = os.environ.get("MEDGEMMA_TEXT_MODEL_ID")
+                return mock_graph.invoke.return_value
+
+            mock_graph.invoke.side_effect = capture_invoke
+
+            run_council_cli(
+                age=65, sex="Male", chief_complaint="Chest pain",
+            )
+            assert captured_env["model_id"] is None
+        finally:
+            if env_backup is not None:
+                os.environ["MEDGEMMA_TEXT_MODEL_ID"] = env_backup
+
+    @patch("council_cli.build_council_graph")
+    def test_text_model_id_cleaned_up_after_error(self, mock_build):
+        """MEDGEMMA_TEXT_MODEL_ID should be cleaned up even if graph fails."""
+        import os
+        from council_cli import run_council_cli
+
+        mock_graph = MagicMock()
+        mock_graph.invoke.side_effect = RuntimeError("boom")
+        mock_build.return_value = mock_graph
+
+        env_backup = os.environ.pop("MEDGEMMA_TEXT_MODEL_ID", None)
+        try:
+            run_council_cli(
+                age=65, sex="Male", chief_complaint="Chest pain",
+                text_model_id="google/medgemma-4b-it",
+            )
+            # After the call (which handles the error internally), env should be clean
+            assert os.environ.get("MEDGEMMA_TEXT_MODEL_ID") is None
+        finally:
+            if env_backup is not None:
+                os.environ["MEDGEMMA_TEXT_MODEL_ID"] = env_backup
+
+
+class TestMainArgparse:
+    """Tests for argparse CLI changes in main()."""
+
+    @patch("council_cli.run_council_cli")
+    @patch("council_cli.format_result")
+    def test_model_id_flag_passed_to_run(self, mock_format, mock_run):
+        """--model-id flag should be passed as text_model_id to run_council_cli."""
+        from council_cli import main
+
+        mock_run.return_value = {"final_plan": "Plan."}
+        mock_format.return_value = "output"
+
+        with patch("sys.argv", [
+            "council_cli.py",
+            "--age", "65", "--sex", "Male", "--complaint", "Chest pain",
+            "--model-id", "google/medgemma-4b-it",
+        ]):
+            with patch("builtins.print"):
+                main()
+
+        mock_run.assert_called_once()
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["text_model_id"] == "google/medgemma-4b-it"
+
+    @patch("council_cli.run_council_cli")
+    @patch("council_cli.format_result")
+    def test_verbose_defaults_true_in_argparse(self, mock_format, mock_run):
+        """--verbose should default to True (no flag needed for debug)."""
+        from council_cli import main
+
+        mock_run.return_value = {"final_plan": "Plan."}
+        mock_format.return_value = "output"
+
+        with patch("sys.argv", [
+            "council_cli.py",
+            "--age", "65", "--sex", "Male", "--complaint", "Chest pain",
+        ]):
+            with patch("builtins.print"):
+                main()
+
+        mock_run.assert_called_once()
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["verbose"] is True
+
+    @patch("council_cli.run_council_cli")
+    @patch("council_cli.format_result")
+    def test_quiet_flag_disables_verbose(self, mock_format, mock_run):
+        """--quiet flag should set verbose=False."""
+        from council_cli import main
+
+        mock_run.return_value = {"final_plan": "Plan."}
+        mock_format.return_value = "output"
+
+        with patch("sys.argv", [
+            "council_cli.py",
+            "--age", "65", "--sex", "Male", "--complaint", "Chest pain",
+            "--quiet",
+        ]):
+            with patch("builtins.print"):
+                main()
+
+        mock_run.assert_called_once()
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["verbose"] is False
