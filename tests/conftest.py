@@ -62,6 +62,54 @@ def mock_llm():
 
 
 @pytest.fixture
+def mock_text_tokenizer():
+    """
+    Creates a properly configured mock tokenizer for TextModelWrapper tests.
+    
+    The mock simulates apply_chat_template returning a tensor (not BatchEncoding),
+    with correct shape and device handling.
+    """
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.pad_token_id = 0
+    
+    # Create a mock tensor that behaves like a real tensor
+    # Key: __contains__ should return False for "input_ids" (it's a tensor, not dict)
+    mock_input_ids = MagicMock()
+    mock_input_ids.shape = (1, 10)
+    mock_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+    mock_input_ids.to.return_value = mock_input_ids  # .to() returns self
+    # Make "input_ids" in mock_input_ids return False
+    mock_input_ids.__contains__ = MagicMock(return_value=False)
+    
+    mock_tokenizer.apply_chat_template.return_value = mock_input_ids
+    mock_tokenizer.decode.return_value = "response text"
+    
+    return mock_tokenizer
+
+
+@pytest.fixture
+def mock_text_model():
+    """
+    Creates a properly configured mock model for TextModelWrapper tests.
+    
+    The mock simulates generate() returning output with correct shape.
+    """
+    mock_model = MagicMock()
+    
+    # Create mock output that has shape and slicing behavior
+    mock_output = MagicMock()
+    mock_output.shape = (1, 20)  # 10 input + 10 generated
+    # output[0] returns something sliceable
+    mock_full_seq = MagicMock()
+    mock_full_seq.__getitem__ = MagicMock(return_value=MagicMock())
+    mock_output.__getitem__ = MagicMock(return_value=mock_full_seq)
+    
+    mock_model.generate.return_value = mock_output
+    
+    return mock_model
+
+
+@pytest.fixture
 def mock_vision_model():
     """
     Simulates the MedGemma 1.5 4B multimodal pipeline (transformers).

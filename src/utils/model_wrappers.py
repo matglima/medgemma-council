@@ -206,6 +206,12 @@ class TextModelWrapper:
             )
 
             # 3. Strip input tokens from output (only keep generated)
+            # Log full output shape for debugging
+            output_len = output_ids.shape[1] if hasattr(output_ids, 'shape') else len(output_ids[0])
+            logger.debug(
+                f"TextModelWrapper: input_len={input_len}, output_len={output_len}, "
+                f"generated={output_len - input_len}"
+            )
             generated_ids = output_ids[0][input_len:]
 
             # 4. Decode generated tokens
