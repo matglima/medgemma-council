@@ -145,7 +145,8 @@ class TestGetBnbConfig:
         with patch("utils.quantization._check_bitsandbytes"):
             with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
                 MockBnB.return_value = MagicMock()
-                bnb = get_bnb_config(qconfig)
+                with patch("utils.quantization._get_optimal_torch_dtype", return_value="bfloat16"):
+                    bnb = get_bnb_config(qconfig)
 
         MockBnB.assert_called_once()
         assert bnb is not None
@@ -159,7 +160,8 @@ class TestGetBnbConfig:
         with patch("utils.quantization._check_bitsandbytes"):
             with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
                 MockBnB.return_value = MagicMock()
-                get_bnb_config(qconfig)
+                with patch("utils.quantization._get_optimal_torch_dtype", return_value="bfloat16"):
+                    get_bnb_config(qconfig)
 
         call_kwargs = MockBnB.call_args[1]
         assert call_kwargs["load_in_4bit"] is True
@@ -174,9 +176,85 @@ class TestGetBnbConfig:
         with patch("utils.quantization._check_bitsandbytes") as mock_check:
             with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
                 MockBnB.return_value = MagicMock()
-                get_bnb_config(qconfig)
+                with patch("utils.quantization._get_optimal_torch_dtype", return_value="bfloat16"):
+                    get_bnb_config(qconfig)
 
         mock_check.assert_called_once()
+
+    def test_get_bnb_config_overrides_compute_dtype_for_t4(self):
+        """On T4 GPUs (CC 7.5), get_bnb_config() should override bnb_4bit_compute_dtype to float16.
+
+        The QuantizationConfig dataclass default is bfloat16, but T4 GPUs lack native
+        bfloat16 tensor cores. Using bfloat16 compute dtype for 4-bit dequantization
+        produces inf/nan logits, triggering a CUDA device-side assert.
+        """
+        import sys
+        from utils.quantization import QuantizationConfig, get_bnb_config
+
+        qconfig = QuantizationConfig()  # default bnb_4bit_compute_dtype="bfloat16"
+
+        mock_torch = MagicMock()
+        mock_torch.bfloat16 = "torch.bfloat16"
+        mock_torch.float16 = "torch.float16"
+        mock_torch.float32 = "torch.float32"
+
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
+                    with patch.dict(sys.modules, {"torch": mock_torch}):
+                        get_bnb_config(qconfig)
+
+        call_kwargs = MockBnB.call_args[1]
+        # On T4, compute dtype MUST be float16, NOT bfloat16
+        assert call_kwargs["bnb_4bit_compute_dtype"] == "torch.float16"
+
+    def test_get_bnb_config_keeps_bfloat16_compute_dtype_on_ampere(self):
+        """On Ampere+ GPUs (CC >= 8.0), get_bnb_config() should keep bfloat16 compute dtype."""
+        import sys
+        from utils.quantization import QuantizationConfig, get_bnb_config
+
+        qconfig = QuantizationConfig()  # default bnb_4bit_compute_dtype="bfloat16"
+
+        mock_torch = MagicMock()
+        mock_torch.bfloat16 = "torch.bfloat16"
+        mock_torch.float16 = "torch.float16"
+        mock_torch.float32 = "torch.float32"
+
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization._get_optimal_torch_dtype", return_value="bfloat16"):
+                    with patch.dict(sys.modules, {"torch": mock_torch}):
+                        get_bnb_config(qconfig)
+
+        call_kwargs = MockBnB.call_args[1]
+        assert call_kwargs["bnb_4bit_compute_dtype"] == "torch.bfloat16"
+
+    def test_get_bnb_config_logs_dtype_override(self):
+        """When overriding compute dtype, get_bnb_config() should log the change."""
+        import sys
+        from utils.quantization import QuantizationConfig, get_bnb_config
+
+        qconfig = QuantizationConfig()  # default bfloat16
+
+        mock_torch = MagicMock()
+        mock_torch.bfloat16 = "torch.bfloat16"
+        mock_torch.float16 = "torch.float16"
+        mock_torch.float32 = "torch.float32"
+
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
+                    with patch.dict(sys.modules, {"torch": mock_torch}):
+                        with patch("utils.quantization.logger") as mock_logger:
+                            get_bnb_config(qconfig)
+
+        # Should log a warning about overriding
+        mock_logger.warning.assert_called()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "float16" in warning_msg.lower() or "override" in warning_msg.lower()
 
 
 class TestGetOptimalTorchDtype:

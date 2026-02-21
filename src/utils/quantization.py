@@ -141,6 +141,11 @@ def get_bnb_config(qconfig: QuantizationConfig) -> Any:
     """
     Generate a BitsAndBytesConfig from our QuantizationConfig.
 
+    The compute dtype is overridden based on GPU capability: T4 GPUs (CC 7.5)
+    lack native bfloat16 tensor cores, so 4-bit dequantization with bfloat16
+    produces inf/nan logits. This function uses _get_optimal_torch_dtype() to
+    select float16 on T4 and bfloat16 on Ampere+.
+
     Args:
         qconfig: Our quantization configuration dataclass.
 
@@ -154,8 +159,23 @@ def get_bnb_config(qconfig: QuantizationConfig) -> Any:
     # to use it (transformers gives a misleading "pip install" error otherwise)
     _check_bitsandbytes()
 
-    # Resolve compute dtype — defer torch import for test-friendliness
-    compute_dtype = qconfig.bnb_4bit_compute_dtype
+    # Override compute dtype based on GPU hardware capability.
+    # The QuantizationConfig default is bfloat16, but T4 GPUs (CC 7.5) need
+    # float16 — bfloat16 dequantization on T4 produces inf/nan logits.
+    optimal_dtype_str = _get_optimal_torch_dtype()
+    requested_dtype_str = qconfig.bnb_4bit_compute_dtype
+
+    if optimal_dtype_str != requested_dtype_str:
+        logger.warning(
+            f"Overriding bnb_4bit_compute_dtype from '{requested_dtype_str}' to "
+            f"'{optimal_dtype_str}' based on GPU compute capability. "
+            f"This GPU does not support native {requested_dtype_str}; using "
+            f"{optimal_dtype_str} prevents inf/nan during 4-bit dequantization."
+        )
+
+    # Resolve string dtype to torch dtype object
+    compute_dtype_str = optimal_dtype_str
+    compute_dtype: Any = compute_dtype_str  # fallback if torch unavailable
     try:
         import torch
         dtype_map = {
@@ -163,7 +183,7 @@ def get_bnb_config(qconfig: QuantizationConfig) -> Any:
             "float16": torch.float16,
             "float32": torch.float32,
         }
-        compute_dtype = dtype_map.get(qconfig.bnb_4bit_compute_dtype, torch.bfloat16)
+        compute_dtype = dtype_map.get(compute_dtype_str, torch.float16)
     except ImportError:
         # In test environments without torch, pass string (BitsAndBytesConfig is mocked)
         pass
