@@ -193,9 +193,9 @@ class TextModelWrapper:
             # "Setting pad_token_id to eos_token_id" warning.
             if self.tokenizer.pad_token_id is not None:
                 generate_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
-            # Explicitly set eos_token_id to ensure proper generation stopping
-            if self.tokenizer.eos_token_id is not None:
-                generate_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
+            # NOTE: Do NOT override eos_token_id here. The model's generation_config
+            # may have multiple EOS tokens (e.g., [1, 106] for Gemma), and overriding
+            # with a single ID breaks proper generation stopping.
             generate_kwargs.update(kwargs)  # allow callers to override
 
             # Debug: log tokenizer config
@@ -219,6 +219,35 @@ class TextModelWrapper:
             gen_inputs = {"input_ids": input_ids}
             if attention_mask is not None:
                 gen_inputs["attention_mask"] = attention_mask
+
+            # Debug: Run a single forward pass to check logits validity
+            # This helps diagnose quantization issues that produce all-zero outputs
+            try:
+                with torch.no_grad() if torch is not None else None:
+                    # Move input to model device for forward pass
+                    test_input = input_ids
+                    if hasattr(self.model, 'device'):
+                        test_input = test_input.to(self.model.device)
+                    # Get logits for the last input token position
+                    outputs = self.model(test_input, use_cache=False)
+                    if hasattr(outputs, 'logits'):
+                        logits = outputs.logits[0, -1, :]
+                        # Check for NaN/Inf in logits
+                        if torch is not None:
+                            has_nan = torch.isnan(logits).any().item()
+                            has_inf = torch.isinf(logits).any().item()
+                            logits_min = logits.min().item()
+                            logits_max = logits.max().item()
+                            # Find the argmax token
+                            predicted_token = logits.argmax().item()
+                            logger.debug(
+                                f"TextModelWrapper: logits check - "
+                                f"has_nan={has_nan}, has_inf={has_inf}, "
+                                f"range=[{logits_min:.2f}, {logits_max:.2f}], "
+                                f"predicted_token={predicted_token}"
+                            )
+            except Exception as e:
+                logger.debug(f"TextModelWrapper: could not check logits: {e}")
 
             output_ids = self.model.generate(
                 **gen_inputs,
