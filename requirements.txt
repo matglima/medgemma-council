@@ -19,6 +19,7 @@ chromadb>=0.4.0
 
 # External data
 biopython>=1.83
+requests>=2.31.0
 
 # Evaluation benchmarks
 datasets>=2.16.0

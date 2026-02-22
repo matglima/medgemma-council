@@ -162,7 +162,19 @@ batch_scores = judge.evaluate_batch(cases)
 
 ## RAG Ingestion Pipeline
 
-Ingest clinical guideline documents (PDF, TXT, Markdown) into a ChromaDB vector store for retrieval-augmented generation:
+Bootstrap specialty guideline documents from the web and ingest them into a ChromaDB vector store for retrieval-augmented generation:
+
+```bash
+# Scrape curated sources for each specialist and ingest in one step
+python scripts/scrape_guidelines.py \
+  --output-dir data/reference_docs/ \
+  --vector-dir data/vector_store/ \
+  --collection guidelines \
+  --chunk-size 512 \
+  --chunk-overlap 64
+```
+
+Manual ingestion (if documents already exist in `data/reference_docs/`):
 
 ```bash
 # Ingest guidelines from a directory
@@ -179,6 +191,8 @@ python scripts/ingest_guidelines.py \
   --collection cardiology_guidelines
 ```
 
+`RAGTool` auto-bootstraps on first query: if the vector store is empty and reference docs exist, ingestion runs automatically.
+
 The pipeline uses sliding-window chunking with configurable overlap and attaches source metadata (filename, chunk index) to each chunk for citation tracing.
 
 ---
@@ -191,14 +205,14 @@ The pipeline uses sliding-window chunking with configurable overlap and attaches
 | Text Inference | `transformers` + `bitsandbytes` (4-bit NF4 quantization) |
 | Vision Inference | `transformers` (MedGemma 1.5 4B, bfloat16) |
 | Model Parallelism | `device_map="auto"` across 2xT4 GPUs via `accelerate` |
-| RAG | LlamaIndex + ChromaDB |
+| RAG | ChromaDB (auto-bootstrap + local ingestion) |
 | Guideline Ingestion | Custom chunker + ChromaDB upsert |
 | Literature Search | BioPython (`Bio.Entrez`) |
 | Evaluation | MedQA, PubMedQA, MedMCQA, PMC-Patients, LLM-as-Judge |
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock (465 tests) |
+| Testing | pytest + unittest.mock (475 tests) |
 
 ---
 
@@ -242,13 +256,14 @@ medgemma-council/
 │   └── graph.py                 # LangGraph 9-node state machine
 ├── scripts/
 │   ├── __init__.py
-│   └── ingest_guidelines.py     # CLI for guideline ingestion
+│   ├── ingest_guidelines.py     # CLI for guideline ingestion
+│   └── scrape_guidelines.py     # Scrape + ingest curated guideline sources
 ├── tests/
 │   ├── conftest.py              # Global mock fixtures
 │   ├── unit/                    # 26 unit test modules
 │   └── integration/             # Graph flow + safety override tests
 ├── data/
-│   ├── reference_docs/          # Guideline PDFs/TXT (gitignored)
+│   ├── reference_docs/          # Scraped guideline docs (PDF/TXT/MD)
 │   ├── vector_store/            # ChromaDB index (gitignored)
 │   └── uploads/                 # Uploaded medical images
 ├── app.py                       # Streamlit UI
@@ -282,7 +297,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all 465 tests (< 2 seconds, no GPU needed)
+# Run all 475 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -494,8 +509,11 @@ score = judge.evaluate_plan(patient_context, clinical_plan)
 # Guideline ingestion
 from tools.ingestion import GuidelineChunker, IngestionPipeline
 
-pipeline = IngestionPipeline(persist_directory="data/vector_store/")
+pipeline = IngestionPipeline(persist_dir="data/vector_store/")
 pipeline.ingest_directory("data/reference_docs/")
+
+# Or bootstrap docs + ingest in one command
+# !python scripts/scrape_guidelines.py --output-dir data/reference_docs/ --vector-dir data/vector_store/
 ```
 
 ---
@@ -535,7 +553,7 @@ The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_U
 
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (465 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (475 tests) completes in < 2 seconds.
 
 ---
 
