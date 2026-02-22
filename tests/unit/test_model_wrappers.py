@@ -1103,3 +1103,156 @@ class TestVisionModelWrapperLogging:
         all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
         all_log_text = " ".join(all_debug_calls)
         assert "consolidation" in all_log_text.lower() or "lobe" in all_log_text.lower()
+
+
+class TestMultiTokenEosId:
+    """Tests for models with multi-token EOS IDs (e.g., Gemma's [1, 106]).
+
+    Issue: The model's generation_config.eos_token_id can be a list like [1, 106]
+    for models that use multiple end-of-sequence tokens. Overriding this with a
+    single integer from tokenizer.eos_token_id breaks generation stopping.
+    """
+
+    def test_does_not_override_multi_token_eos_id(self):
+        """TextModelWrapper should NOT override eos_token_id when model has
+        a multi-token EOS config like [1, 106].
+
+        The model.generate() call should receive eos_token_id from the model's
+        generation_config, not from tokenizer.eos_token_id.
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+
+        # Model has multi-token EOS (like Gemma 2)
+        mock_gen_config = MagicMock()
+        mock_gen_config.eos_token_id = [1, 106]  # List, not single int
+        mock_gen_config.pad_token_id = 0
+        mock_gen_config.bos_token_id = 2
+        mock_model.generation_config = mock_gen_config
+
+        # Tokenizer has single EOS token
+        mock_tokenizer.eos_token_id = 1
+        mock_tokenizer.pad_token_id = 0
+        mock_tokenizer.bos_token_id = 2
+
+        # Setup for successful generation
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__contains__ = MagicMock(return_value=False)
+        fake_input_ids.to.return_value = fake_input_ids
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+
+        # Mock model.__call__ for the logits check
+        mock_logits = MagicMock()
+        mock_logits.any.return_value = MagicMock(item=MagicMock(return_value=False))
+        mock_logits.min.return_value = MagicMock(item=MagicMock(return_value=0.0))
+        mock_logits.max.return_value = MagicMock(item=MagicMock(return_value=1.0))
+        mock_logits.argmax.return_value = MagicMock(item=MagicMock(return_value=42))
+        mock_model_output = MagicMock()
+        mock_model_output.logits = MagicMock()
+        mock_model_output.logits.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_model_output.logits.__getitem__.return_value.__getitem__ = MagicMock(
+            return_value=mock_logits
+        )
+        mock_model.return_value = mock_model_output
+
+        # Mock generate output
+        mock_output = MagicMock()
+        mock_output.shape = (1, 20)
+        mock_full_seq = MagicMock()
+        mock_gen_ids = MagicMock()
+        mock_gen_ids.shape = [10]
+        mock_gen_ids.cpu.return_value.numpy.return_value = [1, 2, 3]
+        mock_full_seq.__getitem__ = MagicMock(
+            side_effect=lambda x: mock_gen_ids if isinstance(x, slice) else mock_full_seq
+        )
+        mock_output.__getitem__ = MagicMock(return_value=mock_full_seq)
+        mock_model.generate.return_value = mock_output
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        wrapper("Test prompt", max_tokens=10)
+
+        # Check that generate was called
+        mock_model.generate.assert_called_once()
+        call_kwargs = mock_model.generate.call_args[1]
+
+        # eos_token_id should NOT be in the kwargs (model uses its own config)
+        # OR it should be the list [1, 106], NOT the single int 1
+        if "eos_token_id" in call_kwargs:
+            assert call_kwargs["eos_token_id"] == [1, 106], (
+                f"eos_token_id should be [1, 106] from model config, not "
+                f"{call_kwargs['eos_token_id']}"
+            )
+
+    def test_generates_non_padding_tokens(self):
+        """TextModelWrapper should return decoded text when model generates
+        non-padding tokens.
+
+        Regression test: Model was generating all zeros (padding tokens),
+        resulting in empty decoded output.
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+
+        mock_tokenizer.pad_token_id = 0
+        mock_tokenizer.eos_token_id = 1
+        mock_tokenizer.bos_token_id = 2
+
+        # Setup input
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 10)
+        fake_input_ids.__contains__ = MagicMock(return_value=False)
+        fake_input_ids.to.return_value = fake_input_ids
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+
+        # Model generates non-padding tokens: [100, 200, 300, 1] (ends with EOS)
+        # Full output = input (10 tokens) + generated (4 tokens) = 14 tokens
+        mock_output = MagicMock()
+        mock_output.shape = (1, 14)
+
+        # Simulate the tensor slicing: output[0][input_len:] gives generated tokens
+        mock_gen_ids = MagicMock()
+        mock_gen_ids.shape = [4]  # 4 generated tokens
+        mock_gen_ids.__len__ = MagicMock(return_value=4)
+        mock_gen_ids.cpu.return_value.numpy.return_value = [100, 200, 300, 1]
+
+        # Create a proper mock sequence that supports slicing
+        mock_full_seq = MagicMock()
+        mock_full_seq.__getitem__ = MagicMock(return_value=mock_gen_ids)
+
+        # output[0] returns mock_full_seq
+        mock_output.__getitem__ = MagicMock(return_value=mock_full_seq)
+
+        mock_model.generate.return_value = mock_output
+
+        # Mock forward pass for logits check
+        mock_logits = MagicMock()
+        mock_logits.any.return_value.item.return_value = False
+        mock_logits.min.return_value.item.return_value = 0.5
+        mock_logits.max.return_value.item.return_value = 2.5
+        mock_logits.argmax.return_value.item.return_value = 100
+        mock_model_output = MagicMock()
+        mock_model_output.logits = MagicMock()
+        mock_model_output.logits.__getitem__ = MagicMock(return_value=MagicMock())
+        mock_model_output.logits.__getitem__.return_value.__getitem__ = MagicMock(
+            return_value=mock_logits
+        )
+        mock_model.return_value = mock_model_output
+        mock_model.device = "cuda:0"
+
+        # Decode should return meaningful text
+        mock_tokenizer.decode.return_value = "The patient has chest pain."
+
+        wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+        result = wrapper("Test prompt", max_tokens=10)
+
+        # Should return decoded text, not empty string
+        assert result["choices"][0]["text"] == "The patient has chest pain."
+
+        # Verify decode was called with the generated token IDs
+        mock_tokenizer.decode.assert_called_once()
