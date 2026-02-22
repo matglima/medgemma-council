@@ -525,6 +525,8 @@ The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_U
 
 **GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the 27B model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. `TextModelWrapper` truncates input prompts to `max_input_tokens=4096` to bound KV cache allocation. Generation uses greedy decoding (`do_sample=False`) by default to prevent sampling-mode amplification of numerical errors.
 
+**NaN Logits Stability Guard:** For quantized text inference, model loading now sets both `dtype` and `torch_dtype` in `from_pretrained()` kwargs for cross-version transformers compatibility, and forces `attn_implementation="eager"` for text models. This avoids silent dtype fallback and unstable fused attention kernel selection that can yield `NaN` logits and blank outputs on some Kaggle CUDA/transformers builds.
+
 **Chat Template Formatting:** `TextModelWrapper` applies `tokenizer.apply_chat_template(tokenize=True, truncation=True)` to wrap prompts in the instruction-tuned model's expected format (e.g., `<start_of_turn>user`/`<start_of_turn>model` markers for Gemma 2 IT). Using `tokenize=True` in a single step ensures truncation preserves structural markers; the older two-step approach (tokenize=False then separate truncation) would cut off model-turn markers, causing empty outputs. Falls back gracefully to string-based tokenization, and then to raw prompt for tokenizers without chat template support.
 
 **Vision Model Routing:** When `RadiologyAgent` is activated, `_run_specialists()` creates a separate `VisionModelWrapper` via `factory.create_vision_model()` and passes it specifically to RadiologyAgent. All other specialists receive the text model. The vision model is only loaded when RadiologyAgent is among the activated specialists, avoiding unnecessary model loading. The vision pipeline formats prompts as chat messages with `{"type": "image"}` entries (one per image) to satisfy MedGemma 4B IT's processor requirements.
@@ -533,7 +535,7 @@ The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_U
 
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (451 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (457 tests) completes in < 2 seconds.
 
 ---
 

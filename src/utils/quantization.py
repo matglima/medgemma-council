@@ -257,8 +257,17 @@ def get_model_kwargs(
     kwargs: Dict[str, Any] = {
         "device_map": device_map,
         "quantization_config": bnb_config,
+        # Keep both keys for compatibility across transformers versions.
+        # Some environments read `dtype`, others still rely on `torch_dtype`.
         "dtype": torch_dtype,
+        "torch_dtype": torch_dtype,
     }
+
+    # Gemma-family text models can exhibit NaN logits on some CUDA/transformers
+    # combinations when fused attention kernels are selected automatically.
+    # Force eager attention for stability in quantized text inference.
+    if model_type == "text":
+        kwargs["attn_implementation"] = "eager"
 
     # Set max_memory for multi-GPU setups (14GiB per T4 for headroom)
     if gpu_count >= 2:
@@ -269,7 +278,8 @@ def get_model_kwargs(
     logger.info(
         f"Model kwargs for {model_type}: device_map={device_map}, "
         f"gpu_count={gpu_count}, quantization={qconfig.bnb_4bit_quant_type}, "
-        f"torch_dtype={optimal_dtype_str}"
+        f"torch_dtype={optimal_dtype_str}, "
+        f"attn_implementation={kwargs.get('attn_implementation', 'default')}"
     )
 
     return kwargs

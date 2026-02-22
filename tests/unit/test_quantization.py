@@ -423,8 +423,12 @@ class TestGetModelKwargs:
 
         assert kwargs["dtype"] == "torch.float16"
 
-    def test_get_model_kwargs_uses_dtype_not_torch_dtype(self):
-        """get_model_kwargs uses 'dtype' key for dtype value."""
+    def test_get_model_kwargs_includes_torch_dtype_for_transformers_compat(self):
+        """get_model_kwargs should include torch_dtype for broader transformers compatibility.
+
+        Some Kaggle images pin transformers builds that still expect torch_dtype.
+        Supplying both avoids silent dtype fallback that can trigger NaN logits.
+        """
         from utils.quantization import QuantizationConfig, get_model_kwargs
 
         qconfig = QuantizationConfig()
@@ -438,5 +442,50 @@ class TestGetModelKwargs:
                             mock_torch.float16 = "torch.float16"
                             kwargs = get_model_kwargs(qconfig)
 
-        # The returned dict should use 'dtype' as the key
+        assert "torch_dtype" in kwargs
+        assert kwargs["torch_dtype"] == "torch.float16"
+
+    def test_get_model_kwargs_includes_attention_impl_for_text_models(self):
+        """Text model kwargs should force eager attention for numerical stability."""
+        from utils.quantization import QuantizationConfig, get_model_kwargs
+
+        qconfig = QuantizationConfig()
+
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 1, "gpu_memory_gb": 16.0}):
+                    kwargs = get_model_kwargs(qconfig, model_type="text")
+
+        assert kwargs["attn_implementation"] == "eager"
+
+    def test_get_model_kwargs_does_not_force_attention_impl_for_vision_models(self):
+        """Vision kwargs should not set text attention implementation overrides."""
+        from utils.quantization import QuantizationConfig, get_model_kwargs
+
+        qconfig = QuantizationConfig()
+
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 1, "gpu_memory_gb": 16.0}):
+                    kwargs = get_model_kwargs(qconfig, model_type="vision")
+
+        assert "attn_implementation" not in kwargs
+
+    def test_get_model_kwargs_keeps_dtype_key(self):
+        """get_model_kwargs should continue returning dtype for newer transformers."""
+        from utils.quantization import QuantizationConfig, get_model_kwargs
+
+        qconfig = QuantizationConfig()
+
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization.detect_gpu_config", return_value={"gpu_count": 1, "gpu_memory_gb": 16.0}):
+                    with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
+                        with patch("utils.quantization.torch") as mock_torch:
+                            mock_torch.float16 = "torch.float16"
+                            kwargs = get_model_kwargs(qconfig)
+
         assert "dtype" in kwargs
