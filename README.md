@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-purple.svg)](https://github.com/langchain-ai/langgraph)
 
-**A multi-agent clinical decision support system** for the Kaggle MedGemma Impact Challenge. A "Council of Experts" debates clinical cases via a LangGraph state machine, powered by MedGemma 1.5 models (4B multimodal + 27B text).
+**A multi-agent clinical decision support system** for the Kaggle MedGemma Impact Challenge. A "Council of Experts" debates clinical cases via a LangGraph state machine, powered by MedGemma 1.5 4B by default (with optional 27B override for text).
 
 > **Disclaimer:** This is an AI research project. It is **NOT** a substitute for professional medical advice, diagnosis, or treatment. Always consult a qualified healthcare provider.
 
@@ -198,7 +198,7 @@ The pipeline uses sliding-window chunking with configurable overlap and attaches
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock (451 tests) |
+| Testing | pytest + unittest.mock (460 tests) |
 
 ---
 
@@ -282,7 +282,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all 451 tests (< 2 seconds, no GPU needed)
+# Run all 460 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -310,12 +310,12 @@ python council_cli.py \
   --complaint "Chest pain radiating to left arm" \
   --images /path/to/xray.png /path/to/ct_scan.dcm
 
-# Use the faster 4B model instead of 27B
+# Optional: override to larger 27B text model (slower, higher VRAM)
 python council_cli.py \
   --age 65 \
   --sex Male \
   --complaint "Chest pain" \
-  --model-id google/medgemma-4b-it
+  --model-id google/medgemma-27b-text-it
 
 # Quiet mode (suppress debug logging; verbose is default)
 python council_cli.py \
@@ -337,7 +337,7 @@ python council_cli.py \
 ```python
 from council_cli import run_council_cli
 
-# Default: verbose=True (DEBUG-level logging), uses 27B model
+# Default: verbose=True (DEBUG-level logging), uses 4B model
 result = run_council_cli(
     age=65,
     sex="Male",
@@ -346,12 +346,12 @@ result = run_council_cli(
     medications=["Aspirin", "Lisinopril"],
 )
 
-# Use 4B model for faster inference on Kaggle
+# Optional: override to 27B model on larger hardware
 result = run_council_cli(
     age=65,
     sex="Male",
     chief_complaint="Chest pain",
-    text_model_id="google/medgemma-4b-it",
+    text_model_id="google/medgemma-27b-text-it",
 )
 
 # Quiet mode
@@ -414,12 +414,12 @@ result = run_council_cli(
 
 print(result["final_plan"])
 
-# Use 4B model for faster inference on 2xT4 GPUs
+# Optional: override to 27B model (default already uses 4B)
 result = run_council_cli(
     age=65,
     sex="Male",
     chief_complaint="Chest pain radiating to left arm",
-    text_model_id="google/medgemma-4b-it",
+    text_model_id="google/medgemma-27b-text-it",
 )
 ```
 
@@ -427,7 +427,7 @@ You can also select the text model via environment variable:
 
 ```python
 import os
-os.environ["MEDGEMMA_TEXT_MODEL_ID"] = "google/medgemma-4b-it"
+os.environ["MEDGEMMA_TEXT_MODEL_ID"] = "google/medgemma-27b-text-it"
 ```
 
 See `example_kaggle_notebook.ipynb` for a complete walkthrough.
@@ -506,8 +506,8 @@ pipeline.ingest_directory("data/reference_docs/")
 
 | Model | Format | VRAM | Placement |
 |-------|--------|------|-----------|
-| MedGemma-27B | 4-bit NF4 via `bitsandbytes` | ~13.5 GB | Split across T4 #1 + T4 #2 (`device_map="auto"`) |
-| MedGemma 1.5 4B | bfloat16 | ~8 GB | Single T4, loaded on-demand |
+| MedGemma 1.5 4B (default text/vision) | fp16/bfloat16 | ~8 GB | Single T4, loaded by default |
+| MedGemma-27B (optional text override) | 4-bit NF4 via `bitsandbytes` | ~13.5 GB | Split across T4 #1 + T4 #2 (`device_map="auto"`) |
 
 Quantization config:
 ```python
@@ -523,7 +523,7 @@ BitsAndBytesConfig(
 
 The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_USE_REAL_MODELS` env var). In mock mode (default), no GPU is needed. In real mode, models are loaded with automatic tensor parallelism via `accelerate`.
 
-**GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the 27B model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. `TextModelWrapper` truncates input prompts to `max_input_tokens=4096` to bound KV cache allocation. Generation uses greedy decoding (`do_sample=False`) by default to prevent sampling-mode amplification of numerical errors.
+**GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the same model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. `TextModelWrapper` truncates input prompts to `max_input_tokens=4096` to bound KV cache allocation. Generation uses greedy decoding (`do_sample=False`) by default to prevent sampling-mode amplification of numerical errors.
 
 **NaN Logits Stability Guard:** For quantized text inference, model loading now sets both `dtype` and `torch_dtype` in `from_pretrained()` kwargs for cross-version transformers compatibility, and forces `attn_implementation="eager"` for text models. This avoids silent dtype fallback and unstable fused attention kernel selection that can yield `NaN` logits and blank outputs on some Kaggle CUDA/transformers builds.
 
@@ -535,7 +535,7 @@ The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_U
 
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (457 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (460 tests) completes in < 2 seconds.
 
 ---
 

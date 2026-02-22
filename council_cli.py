@@ -115,10 +115,10 @@ def run_council_cli(
             for maximum visibility into model inference. If False,
             set logging to WARNING.
         text_model_id: Optional HuggingFace model ID to override the
-            default text model (google/medgemma-27b-text-it). Sets
+            default text model (google/medgemma-4b-it). Sets
             the MEDGEMMA_TEXT_MODEL_ID env var for ModelFactory.
-            Use "google/medgemma-4b-it" for faster inference on
-            limited hardware.
+            Use "google/medgemma-27b-text-it" for optional larger-model
+            inference on stronger hardware.
         clear_model_cache: If True, clear the model cache before running.
             Use this if you see CUDA errors (CUBLAS_STATUS_ALLOC_FAILED)
             which indicate corrupted GPU state from a previous run.
@@ -275,7 +275,7 @@ def main():
             "  python council_cli.py --age 65 --sex Male --complaint 'Chest pain'\n"
             "  python council_cli.py --age 5 --sex Female --complaint 'Fever and cough' --output json\n"
             "  python council_cli.py --age 45 --sex Male --complaint 'Skin lesion' --images img1.png img2.png\n"
-            "  python council_cli.py --age 65 --sex Male --complaint 'Chest pain' --model-id google/medgemma-4b-it\n"
+            "  python council_cli.py --age 65 --sex Male --complaint 'Chest pain' --model-id google/medgemma-27b-text-it\n"
             "  python council_cli.py --age 65 --sex Male --complaint 'Chest pain' --quiet\n"
         ),
     )
@@ -288,8 +288,8 @@ def main():
     parser.add_argument("--output", type=str, choices=["text", "json"], default="text", help="Output format")
     parser.add_argument(
         "--model-id", type=str, default=None,
-        help="HuggingFace model ID for text inference (default: google/medgemma-27b-text-it). "
-             "Use google/medgemma-4b-it for faster inference on limited hardware.",
+        help="HuggingFace model ID for text inference (default: google/medgemma-4b-it). "
+             "Optional override: google/medgemma-27b-text-it on larger hardware.",
     )
     parser.add_argument(
         "--quiet", action="store_true",

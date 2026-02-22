@@ -2,7 +2,7 @@
 Global pytest fixtures for MedGemma-Council test suite.
 
 CRITICAL: These fixtures mock all heavy compute (LLM inference, vision models)
-so that tests never load real 27B/4B parameter models. Tests must run in <10s.
+so that tests never load real 4B/27B parameter models. Tests must run in <10s.
 """
 
 import os
@@ -33,7 +33,7 @@ def force_mock_models():
 @pytest.fixture
 def mock_llm():
     """
-    Simulates llama_cpp.Llama for MedGemma-27B text inference.
+    Simulates text inference for MedGemma models (default 4B).
     Returns a deterministic string without loading GPU weights.
     """
     llm = MagicMock()

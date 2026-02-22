@@ -44,6 +44,12 @@ class TestModelFactory:
             factory = ModelFactory()
             assert factory.use_real_models is True
 
+    def test_default_text_model_id_is_4b(self):
+        """Default text model should be MedGemma 1.5 4B for Kaggle stability."""
+        from utils.model_factory import DEFAULT_TEXT_MODEL_ID
+
+        assert DEFAULT_TEXT_MODEL_ID == "google/medgemma-4b-it"
+
     def test_create_text_model_returns_mock_wrapper_by_default(self):
         """In mock mode, create_text_model() should return a MockModelWrapper."""
         from utils.model_factory import ModelFactory
@@ -428,6 +434,44 @@ class TestLoadRealTextModelPadToken:
 
         # Existing pad_token should be preserved
         assert mock_tokenizer.pad_token == "<pad>"
+
+    def test_4b_text_model_load_skips_quantization_path(self):
+        """4B default text model should load without 27B quantization kwargs.
+
+        This keeps default inference lighter and avoids 27B-specific quantization
+        behavior on Kaggle.
+        """
+        import sys
+        from utils.model_factory import ModelFactory
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token = "<pad>"
+        mock_tokenizer.pad_token_id = 0
+        mock_tokenizer.eos_token = "</s>"
+        mock_tokenizer.eos_token_id = 1
+        mock_tokenizer.bos_token_id = 2
+
+        mock_model = MagicMock()
+        mock_model.is_quantized = True
+
+        mock_transformers = MagicMock()
+        mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
+
+        with patch.dict(os.environ, {"MEDGEMMA_USE_REAL_MODELS": "true"}):
+            factory = ModelFactory()
+
+        with patch.dict(sys.modules, {"transformers": mock_transformers}):
+            with patch("utils.model_factory._verify_quantization"):
+                with patch("utils.quantization.get_model_kwargs") as mock_get_model_kwargs:
+                    factory._load_real_text_model("google/medgemma-4b-it")
+
+        # 4B default path should not invoke quantized 27B kwargs builder
+        mock_get_model_kwargs.assert_not_called()
+
+        call_kwargs = mock_transformers.AutoModelForCausalLM.from_pretrained.call_args[1]
+        assert "device_map" in call_kwargs
+        assert "quantization_config" not in call_kwargs
 
 
 class TestTextModelIdEnvVar:

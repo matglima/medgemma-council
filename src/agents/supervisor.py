@@ -1,7 +1,7 @@
 """
 SupervisorAgent: Router & Judge for the MedGemma-Council.
 
-Uses MedGemma-27B (Quantized) to:
+Uses MedGemma 1.5 4B by default (optional 27B override) to:
 1. Route cases to appropriate specialist agents.
 2. Detect conflicts between specialist outputs.
 3. Trigger debate/research cycles when needed.

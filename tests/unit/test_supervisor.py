@@ -3,7 +3,7 @@ Tests for SupervisorAgent (Router & Judge).
 
 TDD: Written BEFORE src/agents/supervisor.py.
 Per MASTER_PROMPT:
-- Use MedGemma-27B (Quantized).
+- Use MedGemma 1.5 4B by default (optional 27B override).
 - Check for contradictions -> route to debate_node or final_report.
 - test_routing_logic: chest pain -> RadiologyAgent, anxiety -> no radiology.
 """

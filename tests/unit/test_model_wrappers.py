@@ -357,7 +357,7 @@ class TestTextModelWrapper:
         """TextModelWrapper should use tokenizer.apply_chat_template() to format
         the prompt with proper structural markers.
 
-        MedGemma-27B-text-it (Gemma 2 IT) expects <start_of_turn>user/model
+        Gemma instruction-tuned chat models expect <start_of_turn>user/model
         markers. Without the chat template, the model generates EOS immediately
         -> empty specialist outputs.
         """

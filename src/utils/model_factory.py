@@ -24,7 +24,9 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 # Default model IDs
-DEFAULT_TEXT_MODEL_ID = "google/medgemma-27b-text-it"
+# Default to MedGemma 1.5 4B for faster/stabler Kaggle inference.
+# Advanced users can override to 27B via MEDGEMMA_TEXT_MODEL_ID.
+DEFAULT_TEXT_MODEL_ID = "google/medgemma-4b-it"
 DEFAULT_VISION_MODEL_ID = "google/medgemma-4b-it"
 
 
@@ -72,7 +74,7 @@ class ModelFactory:
         Uses a class-level cache so that models are loaded only once per
         (type, model_id) pair. This prevents CUDA OOM when multiple graph
         nodes each create a ModelFactory and call create_text_model() —
-        instead of loading the 27B model N times, they all share one instance.
+        instead of loading the text model N times, they all share one instance.
 
         Cache keys are prefixed with "text:" or "vision:" to keep namespaces
         separate even if the same model_id string is used for both.
@@ -109,10 +111,13 @@ class ModelFactory:
         model_id: Optional[str] = None,
     ) -> Any:
         """
-        Create or retrieve a cached text model (MedGemma 27B).
+        Create or retrieve a cached text model.
 
         In mock mode: returns a cached MockModelWrapper(mode="text").
-        In real mode: loads with 4-bit NF4 quantization, wraps in TextModelWrapper.
+        In real mode:
+        - default 4B model loads in non-quantized fp16 mode for Kaggle stability
+        - optional larger models (e.g., 27B) load with 4-bit quantization
+          via QuantizationConfig/get_model_kwargs.
 
         Models are cached by (type, model_id) so repeated calls with the same
         model_id return the same object — critical for avoiding CUDA OOM when
@@ -193,22 +198,18 @@ class ModelFactory:
 
     def _load_real_text_model(self, model_id: str) -> Any:
         """
-        Internal: Load the real 27B text model with quantization and wrap it.
+        Internal: Load a real text model and wrap it.
         Isolated for mocking in tests.
 
-        Uses transformers AutoModelForCausalLM with BitsAndBytesConfig
-        for 4-bit NF4 quantization and device_map="auto" for tensor
-        parallelism across 2xT4 GPUs.
+        Loading strategy:
+        - 4B default (`google/medgemma-4b-it`): fp16 + device_map="auto"
+        - larger text models (e.g., 27B): 4-bit NF4 quantization kwargs
 
         Returns a TextModelWrapper for agent-compatible calling convention.
         """
         from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
         from utils.model_wrappers import TextModelWrapper
-        from utils.quantization import QuantizationConfig, get_model_kwargs
-
-        qconfig = QuantizationConfig()
-        model_kwargs = get_model_kwargs(qconfig, model_type="text")
 
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
@@ -234,10 +235,35 @@ class ModelFactory:
                 f"tokenizer.eos_token_id was None, set to 1 (Gemma default)"
             )
 
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            **model_kwargs,
-        )
+        is_default_4b_text = "medgemma-4b" in model_id.lower()
+
+        if is_default_4b_text:
+            # Keep default Kaggle path simple/stable: no 27B-style quantization.
+            try:
+                import torch
+
+                torch_dtype: Any = torch.float16
+            except ImportError:
+                torch_dtype = "float16"
+
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                device_map="auto",
+                torch_dtype=torch_dtype,
+            )
+            logger.info(
+                f"Loaded default 4B text model '{model_id}' "
+                f"with torch_dtype={torch_dtype}"
+            )
+        else:
+            from utils.quantization import QuantizationConfig, get_model_kwargs
+
+            qconfig = QuantizationConfig()
+            model_kwargs = get_model_kwargs(qconfig, model_type="text")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                **model_kwargs,
+            )
 
         # Ensure model's generation_config has correct token IDs.
         # Critical for proper generation stopping - mismatches cause
@@ -253,8 +279,10 @@ class ModelFactory:
                 model.generation_config.bos_token_id = tokenizer.bos_token_id
                 logger.info(f"Set model.generation_config.bos_token_id = {tokenizer.bos_token_id}")
 
-        # Verify quantization was actually applied (catches silent bnb failures)
-        _verify_quantization(model, model_id)
+        # Verify quantization only for non-4B path (4B default is intentionally
+        # non-quantized to reduce complexity/instability on Kaggle).
+        if not is_default_4b_text:
+            _verify_quantization(model, model_id)
 
         logger.info(f"Loaded text model '{model_id}' successfully, wrapping")
         return TextModelWrapper(model=model, tokenizer=tokenizer)

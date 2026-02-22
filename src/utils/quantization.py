@@ -9,8 +9,8 @@ Provides:
 - get_model_kwargs(): Build complete kwargs dict for model loading.
 
 Hardware targets:
-- MedGemma 27B text: 4-bit NF4 quantization across 2xT4 (~13.5GB weights)
-- MedGemma 4B vision: bfloat16 on single T4 (~8GB)
+- Optional MedGemma 27B text: 4-bit NF4 quantization across 2xT4
+- Default MedGemma 1.5 4B text/vision: lightweight inference path
 """
 
 import logging
@@ -195,23 +195,12 @@ def get_bnb_config(qconfig: QuantizationConfig) -> Any:
         }
         compute_dtype = dtype_map.get(compute_dtype_str, torch.float16)
 
-    # Stability guard for pre-Ampere float16 4-bit paths (e.g., T4).
-    # Disabling double quant reduces NaN-logit risk at the cost of a small
-    # memory increase.
-    use_double_quant = qconfig.bnb_4bit_use_double_quant
-    if compute_dtype_str == "float16" and use_double_quant:
-        logger.warning(
-            "Disabling bnb_4bit_use_double_quant for float16 4-bit inference "
-            "to improve numerical stability on pre-Ampere GPUs."
-        )
-        use_double_quant = False
-
     return BitsAndBytesConfig(
         load_in_4bit=qconfig.load_in_4bit,
         load_in_8bit=qconfig.load_in_8bit,
         bnb_4bit_quant_type=qconfig.bnb_4bit_quant_type,
         bnb_4bit_compute_dtype=compute_dtype,
-        bnb_4bit_use_double_quant=use_double_quant,
+        bnb_4bit_use_double_quant=qconfig.bnb_4bit_use_double_quant,
     )
 
 
@@ -240,7 +229,8 @@ def get_model_kwargs(
 
     Args:
         qconfig: Quantization configuration.
-        model_type: 'text' for 27B text model, 'vision' for 4B multimodal.
+        model_type: 'text' for large text-model quantization kwargs,
+            'vision' for multimodal paths.
 
     Returns:
         Dict of kwargs suitable for AutoModelForCausalLM.from_pretrained().

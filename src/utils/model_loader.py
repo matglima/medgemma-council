@@ -5,7 +5,7 @@ Handles dynamic loading/unloading of models to stay within Kaggle
 dual-T4 GPU constraints (16GB VRAM each). Supports:
 - llama-cpp-python models (legacy text inference)
 - transformers pipelines (MedGemma 1.5 4B multimodal)
-- transformers + bitsandbytes quantized models (MedGemma 27B text)
+- transformers + bitsandbytes quantized models (optional MedGemma 27B text)
 """
 
 from typing import Any, Dict, Optional
@@ -175,7 +175,8 @@ class ModelLoader:
 
         Args:
             name: Registry key for the model.
-            model_id: HuggingFace model ID (e.g., "google/medgemma-27b-text-it").
+            model_id: HuggingFace model ID (e.g., "google/medgemma-27b-text-it"
+                for optional larger-model runs).
             **kwargs: Additional args passed to from_pretrained().
 
         Returns:

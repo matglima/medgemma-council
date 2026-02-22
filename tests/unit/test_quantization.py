@@ -2,8 +2,8 @@
 Tests for quantization configuration utilities.
 
 TDD: Written BEFORE src/utils/quantization.py.
-Per plan: BitsAndBytesConfig with NF4 4-bit quantization for MedGemma 27B
-on Kaggle 2xT4 GPUs (16GB VRAM each).
+Per plan: BitsAndBytesConfig with NF4 4-bit quantization for optional larger
+text models (e.g., MedGemma 27B) on Kaggle 2xT4 GPUs (16GB VRAM each).
 """
 
 import pytest
@@ -244,10 +244,11 @@ class TestGetBnbConfig:
         warning_msg = mock_logger.warning.call_args[0][0]
         assert "float16" in warning_msg.lower() or "override" in warning_msg.lower()
 
-    def test_get_bnb_config_disables_double_quant_on_float16_path(self):
-        """When float16 compute is selected (e.g., T4), disable double quant.
+    def test_get_bnb_config_preserves_double_quant_on_float16_path(self):
+        """When float16 compute is selected, preserve configured double quant.
 
-        This is a stability guard to reduce NaN-logit risk with large 4-bit models.
+        Regression guard: disabling double quant increased memory pressure on
+        Kaggle and triggered OOM. Keep caller-provided value unchanged.
         """
         from utils.quantization import QuantizationConfig, get_bnb_config
 
@@ -264,7 +265,7 @@ class TestGetBnbConfig:
                         get_bnb_config(qconfig)
 
         call_kwargs = MockBnB.call_args[1]
-        assert call_kwargs["bnb_4bit_use_double_quant"] is False
+        assert call_kwargs["bnb_4bit_use_double_quant"] is True
 
 
 class TestGetOptimalTorchDtype:
