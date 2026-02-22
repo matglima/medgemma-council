@@ -193,7 +193,28 @@ class TextModelWrapper:
             # "Setting pad_token_id to eos_token_id" warning.
             if self.tokenizer.pad_token_id is not None:
                 generate_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
+            # Explicitly set eos_token_id to ensure proper generation stopping
+            if self.tokenizer.eos_token_id is not None:
+                generate_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
             generate_kwargs.update(kwargs)  # allow callers to override
+
+            # Debug: log tokenizer config
+            logger.debug(
+                f"TextModelWrapper: tokenizer config - "
+                f"pad_token_id={self.tokenizer.pad_token_id}, "
+                f"eos_token_id={self.tokenizer.eos_token_id}, "
+                f"bos_token_id={self.tokenizer.bos_token_id}"
+            )
+            
+            # Debug: check model's generation config
+            if hasattr(self.model, 'generation_config'):
+                gc = self.model.generation_config
+                logger.debug(
+                    f"TextModelWrapper: model.generation_config - "
+                    f"eos_token_id={getattr(gc, 'eos_token_id', 'N/A')}, "
+                    f"pad_token_id={getattr(gc, 'pad_token_id', 'N/A')}, "
+                    f"bos_token_id={getattr(gc, 'bos_token_id', 'N/A')}"
+                )
 
             gen_inputs = {"input_ids": input_ids}
             if attention_mask is not None:
@@ -206,6 +227,11 @@ class TextModelWrapper:
             )
 
             # 3. Strip input tokens from output (only keep generated)
+            # Debug: check raw output structure
+            logger.debug(
+                f"TextModelWrapper: raw output_ids type={type(output_ids)}, "
+                f"shape={output_ids.shape if hasattr(output_ids, 'shape') else 'no shape'}"
+            )
             # Log full output shape for debugging
             output_len = output_ids.shape[1] if hasattr(output_ids, 'shape') else len(output_ids[0])
             logger.debug(

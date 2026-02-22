@@ -212,20 +212,46 @@ class ModelFactory:
 
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-        # Set pad_token if missing — MedGemma tokenizers may not have one,
-        # which causes "Setting pad_token_id to eos_token_id" warnings and
-        # can cause issues with batched generation.
+        # Ensure critical token IDs are set for proper generation.
+        # MedGemma/Gemma tokenizers use: <pad>=0, <eos>=1, <bos>=2
+        # Without proper token IDs, generate() may produce all padding tokens.
         if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+            # Try to set pad_token from eos_token, or use a default
+            if tokenizer.eos_token is not None:
+                tokenizer.pad_token = tokenizer.eos_token
+            else:
+                tokenizer.pad_token = "<pad>"
             logger.info(
-                f"Set tokenizer.pad_token = eos_token ('{tokenizer.eos_token}') "
-                f"for model '{model_id}' (was None)"
+                f"Set tokenizer.pad_token = '{tokenizer.pad_token}' "
+                f"(pad_token_id={tokenizer.pad_token_id}) for model '{model_id}'"
+            )
+
+        # Ensure eos_token_id is set (critical for stopping generation)
+        if tokenizer.eos_token_id is None:
+            # Default for Gemma-based models
+            tokenizer.eos_token_id = 1
+            logger.warning(
+                f"tokenizer.eos_token_id was None, set to 1 (Gemma default)"
             )
 
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             **model_kwargs,
         )
+
+        # Ensure model's generation_config has correct token IDs.
+        # Critical for proper generation stopping - mismatches cause
+        # models to generate padding tokens indefinitely.
+        if hasattr(model, 'generation_config'):
+            if model.generation_config.eos_token_id is None:
+                model.generation_config.eos_token_id = tokenizer.eos_token_id
+                logger.info(f"Set model.generation_config.eos_token_id = {tokenizer.eos_token_id}")
+            if model.generation_config.pad_token_id is None:
+                model.generation_config.pad_token_id = tokenizer.pad_token_id
+                logger.info(f"Set model.generation_config.pad_token_id = {tokenizer.pad_token_id}")
+            if model.generation_config.bos_token_id is None:
+                model.generation_config.bos_token_id = tokenizer.bos_token_id
+                logger.info(f"Set model.generation_config.bos_token_id = {tokenizer.bos_token_id}")
 
         # Verify quantization was actually applied (catches silent bnb failures)
         _verify_quantization(model, model_id)
