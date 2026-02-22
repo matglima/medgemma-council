@@ -923,6 +923,34 @@ class TestVisionModelWrapper:
         assert call_kwargs.kwargs.get("max_new_tokens") == 512 or \
                (len(call_kwargs.args) > 0 or "max_new_tokens" in str(call_kwargs))
 
+    def test_normalizes_chat_history_generated_text_to_string(self):
+        """Vision wrapper should extract assistant text from chat-history output."""
+        from utils.model_wrappers import VisionModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [
+            {
+                "generated_text": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "url": "img.png"},
+                            {"type": "text", "text": "Analyze this image."},
+                        ],
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "No acute cardiopulmonary abnormality.",
+                    },
+                ]
+            }
+        ]
+
+        wrapper = VisionModelWrapper(pipeline=mock_pipeline)
+        result = wrapper(images=["img.png"], prompt="Analyze this image.")
+
+        assert result == [{"generated_text": "No acute cardiopulmonary abnormality."}]
+
 
 class TestPipelineTextModelWrapper:
     """Tests for pipeline-based text wrapper used by MedGemma 1.5 4B."""

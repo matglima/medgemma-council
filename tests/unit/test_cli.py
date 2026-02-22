@@ -176,6 +176,28 @@ class TestFormatResult:
         assert "DEBATE HISTORY" in output
         assert "Round 1" in output
 
+    def test_format_text_handles_non_string_agent_outputs(self):
+        """Formatter should not crash when an agent output is a list/dict."""
+        from council_cli import format_result
+
+        result = {
+            "final_plan": "Proceed with CT chest and bronchoscopy.",
+            "agent_outputs": {
+                "RadiologyAgent": [
+                    {"role": "assistant", "content": "No pleural effusion."}
+                ]
+            },
+            "debate_history": [],
+            "consensus_reached": True,
+            "conflict_detected": False,
+            "iteration_count": 0,
+            "research_findings": "",
+        }
+
+        output = format_result(result, "text")
+        assert "RadiologyAgent" in output
+        assert "No pleural effusion" in output
+
 
 class TestVerboseFlag:
     """Tests for verbose logging control in run_council_cli and main()."""

@@ -278,21 +278,35 @@ class ModelFactory:
                 torch = None  # type: ignore
 
             if torch is not None:
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                cuda_available = bool(torch.cuda.is_available())
+                gpu_count = int(torch.cuda.device_count()) if cuda_available else 0
                 use_bf16 = False
-                if torch.cuda.is_available() and hasattr(torch.cuda, "is_bf16_supported"):
+                if cuda_available and hasattr(torch.cuda, "is_bf16_supported"):
                     use_bf16 = bool(torch.cuda.is_bf16_supported())
                 dtype: Any = torch.bfloat16 if use_bf16 else torch.float16
             else:
-                device = "cpu"
+                cuda_available = False
+                gpu_count = 0
                 dtype = "float16"
 
             pipe_kwargs: Dict[str, Any] = {
                 "model": model_id,
-                "device": device,
                 "dtype": dtype,
                 "trust_remote_code": True,
             }
+
+            load_mode = "cpu"
+            if cuda_available and gpu_count >= 2:
+                # Encourage model sharding across both GPUs in dual-T4 Kaggle
+                # sessions; this prevents all weights from landing on cuda:0.
+                pipe_kwargs["device_map"] = "balanced_low_0"
+                pipe_kwargs["max_memory"] = {i: "14GiB" for i in range(gpu_count)}
+                load_mode = f"balanced_low_0 across {gpu_count} GPUs"
+            elif cuda_available:
+                pipe_kwargs["device"] = "cuda"
+                load_mode = "single GPU (cuda:0)"
+            else:
+                pipe_kwargs["device"] = "cpu"
 
             # Keep compatibility across transformers versions.
             try:
@@ -304,11 +318,24 @@ class ModelFactory:
                     pipe = pipeline("image-text-to-text", **pipe_kwargs)
                 except TypeError:
                     pipe_kwargs.pop("trust_remote_code", None)
-                    pipe = pipeline("image-text-to-text", **pipe_kwargs)
+                    try:
+                        pipe = pipeline("image-text-to-text", **pipe_kwargs)
+                    except TypeError:
+                        # Older stacks may reject some placement kwargs.
+                        pipe_kwargs.pop("max_memory", None)
+                        pipe_kwargs.pop("device_map", None)
+                        if "device" not in pipe_kwargs:
+                            pipe_kwargs["device"] = "cuda" if cuda_available else "cpu"
+                        pipe = pipeline("image-text-to-text", **pipe_kwargs)
+
+            hf_device_map = getattr(getattr(pipe, "model", None), "hf_device_map", None)
+            if isinstance(hf_device_map, dict):
+                used_devices = sorted({str(device) for device in hf_device_map.values()})
+                logger.info(f"4B pipeline hf_device_map devices: {used_devices}")
 
             logger.info(
                 f"Loaded default 4B text pipeline '{model_id}' "
-                f"with dtype={dtype}, device={device}"
+                f"with dtype={dtype}, placement={load_mode}"
             )
             return PipelineTextModelWrapper(pipeline=pipe)
 

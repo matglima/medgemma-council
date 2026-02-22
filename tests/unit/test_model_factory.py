@@ -491,6 +491,39 @@ class TestLoadRealTextModelPadToken:
         assert call_args.args[0] == "image-text-to-text"
         assert call_args.kwargs.get("model") == "google/medgemma-1.5-4b-it"
 
+    def test_4b_text_model_uses_multi_gpu_device_map_when_two_gpus_available(self):
+        """On 2xT4, 4B pipeline should request a multi-GPU device map.
+
+        This avoids pinning everything to CUDA:0 in Kaggle dual-GPU sessions.
+        """
+        import sys
+        from utils.model_factory import ModelFactory
+
+        mock_pipe = MagicMock()
+        mock_transformers = MagicMock()
+        mock_transformers.pipeline.return_value = mock_pipe
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.device_count.return_value = 2
+        mock_torch.cuda.is_bf16_supported.return_value = False
+        mock_torch.float16 = "float16"
+        mock_torch.bfloat16 = "bfloat16"
+
+        with patch.dict(os.environ, {"MEDGEMMA_USE_REAL_MODELS": "true"}):
+            factory = ModelFactory()
+
+        with patch.dict(
+            sys.modules,
+            {"transformers": mock_transformers, "torch": mock_torch},
+        ):
+            factory._load_real_text_model("google/medgemma-1.5-4b-it")
+
+        call_args = mock_transformers.pipeline.call_args
+        assert call_args.kwargs.get("device_map") == "balanced_low_0"
+        assert call_args.kwargs.get("max_memory") == {0: "14GiB", 1: "14GiB"}
+        assert "device" not in call_args.kwargs
+
 
 class TestTextModelIdEnvVar:
     """Tests for MEDGEMMA_TEXT_MODEL_ID env var override.

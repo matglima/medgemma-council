@@ -31,6 +31,20 @@ from utils.safety import add_disclaimer, redact_pii, scan_for_red_flags
 logger = logging.getLogger(__name__)
 
 
+def _stringify_output(value: Any) -> str:
+    """Convert arbitrary agent outputs to text for safe formatting/redaction."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        try:
+            return json.dumps(value)
+        except Exception:
+            return str(value)
+    return str(value)
+
+
 def build_state(
     age: int,
     sex: str,
@@ -198,23 +212,27 @@ def format_result(result: Dict[str, Any], output_format: str = "text") -> str:
     if output_format == "json":
         # Serialize with safety applied
         safe_result = {
-            "final_plan": redact_pii(result.get("final_plan", "")),
+            "final_plan": redact_pii(_stringify_output(result.get("final_plan", ""))),
             "agent_outputs": {
-                k: redact_pii(v) for k, v in result.get("agent_outputs", {}).items()
+                k: redact_pii(_stringify_output(v))
+                for k, v in result.get("agent_outputs", {}).items()
             },
             "debate_history": [
-                redact_pii(entry) for entry in result.get("debate_history", [])
+                redact_pii(_stringify_output(entry))
+                for entry in result.get("debate_history", [])
             ],
             "consensus_reached": result.get("consensus_reached", False),
             "conflict_detected": result.get("conflict_detected", False),
             "iteration_count": result.get("iteration_count", 0),
-            "research_findings": redact_pii(result.get("research_findings", "")),
+            "research_findings": redact_pii(
+                _stringify_output(result.get("research_findings", ""))
+            ),
         }
         return json.dumps(safe_result, indent=2)
 
     # Text format
     sections = []
-    final_plan = redact_pii(result.get("final_plan", ""))
+    final_plan = redact_pii(_stringify_output(result.get("final_plan", "")))
 
     # Red flag check
     flags = scan_for_red_flags(final_plan)
@@ -237,7 +255,7 @@ def format_result(result: Dict[str, Any], output_format: str = "text") -> str:
         sections.append("SPECIALIST FINDINGS")
         sections.append(f"{'-'*60}")
         for agent_name, finding in agent_outputs.items():
-            safe_finding = redact_pii(finding)
+            safe_finding = redact_pii(_stringify_output(finding))
             sections.append(f"\n[{agent_name}]")
             sections.append(safe_finding)
 
@@ -248,7 +266,7 @@ def format_result(result: Dict[str, Any], output_format: str = "text") -> str:
         sections.append("DEBATE HISTORY")
         sections.append(f"{'-'*60}")
         for i, entry in enumerate(debate, 1):
-            sections.append(f"\nRound {i}: {redact_pii(entry)}")
+            sections.append(f"\nRound {i}: {redact_pii(_stringify_output(entry))}")
 
     # Status
     sections.append(f"\n{'-'*60}")

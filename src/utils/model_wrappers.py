@@ -449,13 +449,19 @@ class VisionModelWrapper:
         return prepared
 
     @staticmethod
+    def _extract_text(result: Any) -> str:
+        """Extract assistant text from vision pipeline outputs."""
+        try:
+            # Reuse the same parser used by the text pipeline wrapper.
+            text = PipelineTextModelWrapper._extract_text(result)
+            return text if isinstance(text, str) else str(text)
+        except Exception:
+            return str(result)
+
+    @staticmethod
     def _normalize_output(result: Any) -> List[Dict[str, str]]:
         """Normalize pipeline output to list[{'generated_text': ...}]."""
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict):
-            return [result]
-        return [{"generated_text": str(result)}]
+        return [{"generated_text": VisionModelWrapper._extract_text(result)}]
 
     def __call__(
         self,
@@ -536,13 +542,8 @@ class VisionModelWrapper:
                 else:
                     raise
 
-            # Log output preview
-            if isinstance(result, list) and result:
-                preview = str(result[0].get("generated_text", ""))[:200]
-            elif isinstance(result, dict):
-                preview = str(result.get("generated_text", ""))[:200]
-            else:
-                preview = str(result)[:200]
+            # Log normalized output preview
+            preview = self._extract_text(result)[:200]
             logger.debug(f"VisionModelWrapper: output_preview={preview!r}")
 
             return self._normalize_output(result)
