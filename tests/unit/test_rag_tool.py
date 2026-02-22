@@ -20,6 +20,14 @@ class TestRAGTool:
         tool = RAGTool(persist_dir="/fake/vector_store")
         assert tool.persist_dir == "/fake/vector_store"
 
+    def test_init_sets_default_collection_and_reference_dir(self):
+        """RAGTool should default to guidelines collection and docs dir."""
+        from tools.rag_tool import RAGTool
+
+        tool = RAGTool(persist_dir="/fake/vector_store")
+        assert tool.collection_name == "guidelines"
+        assert "reference_docs" in tool.reference_docs_dir
+
     def test_query_returns_results(self):
         """query() must return a list of retrieved text chunks."""
         from tools.rag_tool import RAGTool
@@ -83,3 +91,37 @@ class TestRAGTool:
         with patch.object(tool, "_ingest_files") as mock_ingest:
             tool.ingest(["/fake/doc1.pdf", "/fake/doc2.pdf"])
             mock_ingest.assert_called_once_with(["/fake/doc1.pdf", "/fake/doc2.pdf"])
+
+    def test_query_bootstraps_ingestion_when_store_empty(self):
+        """query() should ingest reference docs when collection is empty."""
+        from tools.rag_tool import RAGTool
+
+        tool = RAGTool(
+            persist_dir="/fake/vector_store",
+            reference_docs_dir="/fake/reference_docs",
+        )
+
+        with patch.object(tool, "_collection_count", return_value=0), \
+             patch.object(tool, "_list_reference_docs", return_value=["/fake/reference_docs/cardio.md"]), \
+             patch.object(tool, "_ingest_files") as mock_ingest, \
+             patch.object(tool, "_retrieve", return_value=[]):
+            tool.query("acute coronary syndrome", top_k=3)
+
+        mock_ingest.assert_called_once_with(["/fake/reference_docs/cardio.md"])
+
+    def test_query_does_not_bootstrap_when_store_has_documents(self):
+        """query() should skip auto-ingestion when collection already populated."""
+        from tools.rag_tool import RAGTool
+
+        tool = RAGTool(
+            persist_dir="/fake/vector_store",
+            reference_docs_dir="/fake/reference_docs",
+        )
+
+        with patch.object(tool, "_collection_count", return_value=5), \
+             patch.object(tool, "_list_reference_docs", return_value=["/fake/reference_docs/cardio.md"]), \
+             patch.object(tool, "_ingest_files") as mock_ingest, \
+             patch.object(tool, "_retrieve", return_value=[]):
+            tool.query("acute coronary syndrome", top_k=3)
+
+        mock_ingest.assert_not_called()

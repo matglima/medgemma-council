@@ -548,3 +548,20 @@ class TestSpecialistLogging:
         all_debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
         all_log_text = " ".join(all_debug_calls)
         assert "oncologyagent" in all_log_text.lower()
+
+    def test_rag_query_includes_specialty_hint(self, mock_llm):
+        """RAG query text should include specialist name for better recall."""
+        from agents.specialists import CardiologyAgent
+
+        agent = CardiologyAgent(llm=mock_llm)
+
+        with patch.object(agent, "rag_tool") as mock_rag:
+            mock_rag.query.return_value = []
+            mock_rag.format_context.return_value = ""
+            agent._run_inference(
+                patient_context={"chief_complaint": "chest pain"},
+            )
+
+        assert mock_rag.query.called
+        query_text = mock_rag.query.call_args[0][0]
+        assert "CardiologyAgent" in query_text

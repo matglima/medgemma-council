@@ -81,8 +81,9 @@ class _SpecialistAgent(BaseAgent):
 
         # 1. Retrieve relevant guidelines from vector store
         complaint = patient_context.get("chief_complaint", "clinical assessment")
+        rag_query = f"{self.name} guideline recommendations for: {complaint}"
         try:
-            rag_chunks = self.rag_tool.query(complaint, top_k=3)
+            rag_chunks = self.rag_tool.query(rag_query, top_k=3)
             guideline_context = self.rag_tool.format_context(rag_chunks)
         except Exception:
             rag_chunks = []
