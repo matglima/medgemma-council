@@ -672,6 +672,45 @@ class TestTextModelWrapper:
         call_kwargs = mock_model.generate.call_args
         assert "attention_mask" in call_kwargs.kwargs
 
+    def test_skips_attention_mask_creation_for_non_tensor_input_ids(self):
+        """When chat template returns a non-tensor mock object, the wrapper
+        should skip torch.ones_like() instead of raising.
+
+        Regression: On Kaggle (torch installed), ones_like(MagicMock) raises
+        TypeError and prevents model.generate() from running.
+        """
+        from utils.model_wrappers import TextModelWrapper
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+
+        fake_input_ids = MagicMock()
+        fake_input_ids.shape = (1, 5)
+        fake_input_ids.__getitem__ = MagicMock(return_value=MagicMock())
+        fake_input_ids.__contains__ = MagicMock(return_value=False)
+        fake_input_ids.to.return_value = fake_input_ids
+
+        mock_tokenizer.apply_chat_template.return_value = fake_input_ids
+        mock_tokenizer.decode.return_value = "response"
+        mock_model.generate.return_value = MagicMock()
+
+        class _FakeTensor:
+            pass
+
+        with patch("utils.model_wrappers.torch") as mock_torch:
+            mock_torch.Tensor = _FakeTensor
+            mock_torch.ones_like.side_effect = TypeError(
+                "ones_like(): argument 'input' must be Tensor"
+            )
+
+            wrapper = TextModelWrapper(model=mock_model, tokenizer=mock_tokenizer)
+            result = wrapper("Test prompt", max_tokens=100)
+
+        # Should still generate and return the normal format.
+        assert "choices" in result
+        mock_model.generate.assert_called_once()
+
     def test_handles_batch_encoding_from_apply_chat_template(self):
         """When apply_chat_template(tokenize=True) returns a BatchEncoding dict
         (with 'input_ids' and 'attention_mask' keys) instead of a plain tensor,

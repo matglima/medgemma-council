@@ -24,6 +24,7 @@ Agent interface contract:
 """
 
 import logging
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -172,12 +173,15 @@ class TextModelWrapper:
 
                 # Create attention_mask if not provided
                 if attention_mask is None:
+                    attention_mask = None
                     if torch is not None:
-                        attention_mask = torch.ones_like(input_ids)
-                    else:
-                        attention_mask = None
+                        try:
+                            attention_mask = torch.ones_like(input_ids)
+                        except Exception:
+                            attention_mask = None
                 else:
-                    attention_mask = attention_mask.to(input_ids.device)
+                    if hasattr(attention_mask, "to") and hasattr(input_ids, "device"):
+                        attention_mask = attention_mask.to(input_ids.device)
 
             input_len = input_ids.shape[1]
 
@@ -223,7 +227,7 @@ class TextModelWrapper:
             # Debug: Run a single forward pass to check logits validity
             # This helps diagnose quantization issues that produce all-zero outputs
             try:
-                with torch.no_grad() if torch is not None else None:
+                with torch.no_grad() if torch is not None else nullcontext():
                     # Move input to model device for forward pass
                     test_input = input_ids
                     if hasattr(self.model, 'device'):
