@@ -244,6 +244,28 @@ class TestGetBnbConfig:
         warning_msg = mock_logger.warning.call_args[0][0]
         assert "float16" in warning_msg.lower() or "override" in warning_msg.lower()
 
+    def test_get_bnb_config_disables_double_quant_on_float16_path(self):
+        """When float16 compute is selected (e.g., T4), disable double quant.
+
+        This is a stability guard to reduce NaN-logit risk with large 4-bit models.
+        """
+        from utils.quantization import QuantizationConfig, get_bnb_config
+
+        qconfig = QuantizationConfig(bnb_4bit_use_double_quant=True)
+
+        with patch("utils.quantization._check_bitsandbytes"):
+            with patch("utils.quantization.BitsAndBytesConfig") as MockBnB:
+                MockBnB.return_value = MagicMock()
+                with patch("utils.quantization._get_optimal_torch_dtype", return_value="float16"):
+                    with patch("utils.quantization.torch") as mock_torch:
+                        mock_torch.bfloat16 = "torch.bfloat16"
+                        mock_torch.float16 = "torch.float16"
+                        mock_torch.float32 = "torch.float32"
+                        get_bnb_config(qconfig)
+
+        call_kwargs = MockBnB.call_args[1]
+        assert call_kwargs["bnb_4bit_use_double_quant"] is False
+
 
 class TestGetOptimalTorchDtype:
     """Tests for GPU-aware torch dtype selection."""
