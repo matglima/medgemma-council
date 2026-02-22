@@ -7,6 +7,10 @@ expected by council agents:
 - TextModelWrapper: wraps AutoModelForCausalLM + AutoTokenizer
     -> callable(prompt, max_tokens=N) -> {"choices": [{"text": "..."}]}
 
+- PipelineTextModelWrapper: wraps transformers pipeline("image-text-to-text")
+    for MedGemma 1.5 text-only prompting via chat messages
+    -> callable(prompt, max_tokens=N) -> {"choices": [{"text": "..."}]}
+
 - VisionModelWrapper: wraps transformers pipeline("image-text-to-text")
     -> callable(images=..., prompt=...) -> [{"generated_text": "..."}]
 
@@ -318,6 +322,90 @@ class TextModelWrapper:
 
         except Exception as e:
             logger.error(f"TextModelWrapper inference error: {e}")
+            return {"choices": [{"text": f"Error during inference: {e}"}]}
+
+
+class PipelineTextModelWrapper:
+    """Wraps a chat-capable transformers pipeline for text-only use.
+
+    This wrapper is used for MedGemma 1.5 4B, following the official
+    inference approach based on `pipeline("image-text-to-text")`.
+    """
+
+    def __init__(self, pipeline: Any) -> None:
+        self.pipeline = pipeline
+
+    @staticmethod
+    def _extract_text(result: Any) -> str:
+        """Extract assistant text from pipeline outputs across shapes."""
+        payload = result
+        if isinstance(result, list) and result:
+            payload = result[0]
+
+        generated = payload
+        if isinstance(payload, dict):
+            generated = payload.get("generated_text", "")
+
+        # Official MedGemma pipeline shape:
+        # output[0]["generated_text"][-1]["content"]
+        if isinstance(generated, list) and generated:
+            last = generated[-1]
+            if isinstance(last, dict):
+                content = last.get("content", "")
+                if isinstance(content, list):
+                    parts = []
+                    for item in content:
+                        if isinstance(item, dict):
+                            if item.get("type") == "text":
+                                parts.append(str(item.get("text", "")))
+                            elif "text" in item:
+                                parts.append(str(item["text"]))
+                            else:
+                                parts.append(str(item))
+                        else:
+                            parts.append(str(item))
+                    text = " ".join(p for p in parts if p).strip()
+                    return text if text else str(content)
+                return str(content)
+            return str(last)
+
+        if isinstance(generated, dict):
+            return str(generated.get("content", generated))
+
+        return str(generated)
+
+    def __call__(
+        self,
+        prompt: str,
+        max_tokens: int = 1024,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Run pipeline inference and return llama-cpp-style output."""
+        try:
+            logger.debug(
+                f"PipelineTextModelWrapper: prompt={len(prompt)} chars, "
+                f"max_tokens={max_tokens}"
+            )
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt}],
+                }
+            ]
+
+            result = self.pipeline(
+                text=messages,
+                max_new_tokens=max_tokens,
+                **kwargs,
+            )
+
+            text = self._extract_text(result)
+            logger.debug(f"PipelineTextModelWrapper: output_preview={text[:200]!r}")
+            return {"choices": [{"text": text}]}
+
+        except Exception as e:
+            logger.error(f"PipelineTextModelWrapper inference error: {e}")
             return {"choices": [{"text": f"Error during inference: {e}"}]}
 
 

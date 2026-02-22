@@ -285,10 +285,10 @@ class TestTextModelIdFlag:
 
         run_council_cli(
             age=65, sex="Male", chief_complaint="Chest pain",
-            text_model_id="google/medgemma-4b-it",
+            text_model_id="google/medgemma-1.5-4b-it",
         )
 
-        assert captured_env["model_id"] == "google/medgemma-4b-it"
+        assert captured_env["model_id"] == "google/medgemma-1.5-4b-it"
 
     @patch("council_cli.build_council_graph")
     def test_text_model_id_none_does_not_set_env_var(self, mock_build):
@@ -338,7 +338,7 @@ class TestTextModelIdFlag:
         try:
             run_council_cli(
                 age=65, sex="Male", chief_complaint="Chest pain",
-                text_model_id="google/medgemma-4b-it",
+                text_model_id="google/medgemma-1.5-4b-it",
             )
             # After the call (which handles the error internally), env should be clean
             assert os.environ.get("MEDGEMMA_TEXT_MODEL_ID") is None
@@ -362,14 +362,14 @@ class TestMainArgparse:
         with patch("sys.argv", [
             "council_cli.py",
             "--age", "65", "--sex", "Male", "--complaint", "Chest pain",
-            "--model-id", "google/medgemma-4b-it",
+            "--model-id", "google/medgemma-1.5-4b-it",
         ]):
             with patch("builtins.print"):
                 main()
 
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
-        assert call_kwargs["text_model_id"] == "google/medgemma-4b-it"
+        assert call_kwargs["text_model_id"] == "google/medgemma-1.5-4b-it"
 
     @patch("council_cli.run_council_cli")
     @patch("council_cli.format_result")

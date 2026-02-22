@@ -200,7 +200,7 @@ class ModelLoader:
 
         Args:
             name: Registry key for the model.
-            model_id: HuggingFace model ID (e.g., "google/medgemma-4b-it").
+            model_id: HuggingFace model ID (e.g., "google/medgemma-1.5-4b-it").
             **kwargs: Additional args passed to pipeline().
 
         Returns:

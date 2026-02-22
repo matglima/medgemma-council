@@ -115,7 +115,7 @@ def run_council_cli(
             for maximum visibility into model inference. If False,
             set logging to WARNING.
         text_model_id: Optional HuggingFace model ID to override the
-            default text model (google/medgemma-4b-it). Sets
+            default text model (google/medgemma-1.5-4b-it). Sets
             the MEDGEMMA_TEXT_MODEL_ID env var for ModelFactory.
             Use "google/medgemma-27b-text-it" for optional larger-model
             inference on stronger hardware.
@@ -288,7 +288,7 @@ def main():
     parser.add_argument("--output", type=str, choices=["text", "json"], default="text", help="Output format")
     parser.add_argument(
         "--model-id", type=str, default=None,
-        help="HuggingFace model ID for text inference (default: google/medgemma-4b-it). "
+        help="HuggingFace model ID for text inference (default: google/medgemma-1.5-4b-it). "
              "Optional override: google/medgemma-27b-text-it on larger hardware.",
     )
     parser.add_argument(

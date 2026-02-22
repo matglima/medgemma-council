@@ -26,8 +26,24 @@ logger = logging.getLogger(__name__)
 # Default model IDs
 # Default to MedGemma 1.5 4B for faster/stabler Kaggle inference.
 # Advanced users can override to 27B via MEDGEMMA_TEXT_MODEL_ID.
-DEFAULT_TEXT_MODEL_ID = "google/medgemma-4b-it"
-DEFAULT_VISION_MODEL_ID = "google/medgemma-4b-it"
+DEFAULT_TEXT_MODEL_ID = "google/medgemma-1.5-4b-it"
+DEFAULT_VISION_MODEL_ID = "google/medgemma-1.5-4b-it"
+
+# Backward-compatible aliases
+_MODEL_ID_ALIASES = {
+    "google/medgemma-4b-it": "google/medgemma-1.5-4b-it",
+}
+
+
+def _normalize_model_id(model_id: str) -> str:
+    """Normalize known legacy model IDs to canonical IDs."""
+    normalized = _MODEL_ID_ALIASES.get(model_id, model_id)
+    if normalized != model_id:
+        logger.warning(
+            f"ModelFactory: model_id '{model_id}' is deprecated; "
+            f"using '{normalized}'"
+        )
+    return normalized
 
 
 def _verify_quantization(model: Any, model_id: str) -> None:
@@ -144,6 +160,8 @@ class ModelFactory:
                 f"(env var {'set' if 'MEDGEMMA_TEXT_MODEL_ID' in os.environ else 'not set'})"
             )
 
+        model_id = _normalize_model_id(model_id)
+
         cache_key = f"text:{model_id}"
 
         if cache_key in ModelFactory._model_cache:
@@ -156,7 +174,7 @@ class ModelFactory:
             logger.info(f"Creating mock text model for '{model_id}'")
             wrapper = MockModelWrapper(mode="text")
         else:
-            logger.info(f"Loading real text model '{model_id}' with quantization")
+            logger.info(f"Loading real text model '{model_id}' for inference")
             wrapper = self._load_real_text_model(model_id)
 
         ModelFactory._model_cache[cache_key] = wrapper
@@ -178,6 +196,7 @@ class ModelFactory:
         Returns:
             A callable model wrapper conforming to the agent interface.
         """
+        model_id = _normalize_model_id(model_id)
         cache_key = f"vision:{model_id}"
 
         if cache_key in ModelFactory._model_cache:
@@ -202,22 +221,69 @@ class ModelFactory:
         Isolated for mocking in tests.
 
         Loading strategy:
-        - 4B default (`google/medgemma-4b-it`): fp16 + device_map="auto"
-        - larger text models (e.g., 27B): 4-bit NF4 quantization kwargs
+        - 4B default (`google/medgemma-1.5-4b-it`): official
+          pipeline("image-text-to-text") path
+        - larger text models (e.g., 27B): AutoModel + 4-bit NF4 quantization
+          kwargs
 
-        Returns a TextModelWrapper for agent-compatible calling convention.
+        Returns a text-capable wrapper for the agent calling convention.
         """
+        is_default_4b_text = "medgemma-1.5-4b" in model_id.lower()
+
+        if is_default_4b_text:
+            from transformers import pipeline  # type: ignore
+
+            from utils.model_wrappers import PipelineTextModelWrapper
+
+            try:
+                import torch  # type: ignore
+            except ImportError:
+                torch = None  # type: ignore
+
+            if torch is not None:
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                use_bf16 = False
+                if torch.cuda.is_available() and hasattr(torch.cuda, "is_bf16_supported"):
+                    use_bf16 = bool(torch.cuda.is_bf16_supported())
+                dtype: Any = torch.bfloat16 if use_bf16 else torch.float16
+            else:
+                device = "cpu"
+                dtype = "float16"
+
+            pipe_kwargs: Dict[str, Any] = {
+                "model": model_id,
+                "device": device,
+                "dtype": dtype,
+                "trust_remote_code": True,
+            }
+
+            # Keep compatibility across transformers versions.
+            try:
+                pipe = pipeline("image-text-to-text", **pipe_kwargs)
+            except TypeError:
+                pipe_kwargs.pop("dtype", None)
+                pipe_kwargs["torch_dtype"] = dtype
+                try:
+                    pipe = pipeline("image-text-to-text", **pipe_kwargs)
+                except TypeError:
+                    pipe_kwargs.pop("trust_remote_code", None)
+                    pipe = pipeline("image-text-to-text", **pipe_kwargs)
+
+            logger.info(
+                f"Loaded default 4B text pipeline '{model_id}' "
+                f"with dtype={dtype}, device={device}"
+            )
+            return PipelineTextModelWrapper(pipeline=pipe)
+
         from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
 
         from utils.model_wrappers import TextModelWrapper
+        from utils.quantization import QuantizationConfig, get_model_kwargs
 
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
         # Ensure critical token IDs are set for proper generation.
-        # MedGemma/Gemma tokenizers use: <pad>=0, <eos>=1, <bos>=2
-        # Without proper token IDs, generate() may produce all padding tokens.
         if tokenizer.pad_token is None:
-            # Try to set pad_token from eos_token, or use a default
             if tokenizer.eos_token is not None:
                 tokenizer.pad_token = tokenizer.eos_token
             else:
@@ -227,62 +293,37 @@ class ModelFactory:
                 f"(pad_token_id={tokenizer.pad_token_id}) for model '{model_id}'"
             )
 
-        # Ensure eos_token_id is set (critical for stopping generation)
         if tokenizer.eos_token_id is None:
-            # Default for Gemma-based models
             tokenizer.eos_token_id = 1
             logger.warning(
-                f"tokenizer.eos_token_id was None, set to 1 (Gemma default)"
+                "tokenizer.eos_token_id was None, set to 1 (Gemma default)"
             )
 
-        is_default_4b_text = "medgemma-4b" in model_id.lower()
+        qconfig = QuantizationConfig()
+        model_kwargs = get_model_kwargs(qconfig, model_type="text")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            **model_kwargs,
+        )
 
-        if is_default_4b_text:
-            # Keep default Kaggle path simple/stable: no 27B-style quantization.
-            try:
-                import torch
-
-                torch_dtype: Any = torch.float16
-            except ImportError:
-                torch_dtype = "float16"
-
-            model = AutoModelForCausalLM.from_pretrained(
-                model_id,
-                device_map="auto",
-                torch_dtype=torch_dtype,
-            )
-            logger.info(
-                f"Loaded default 4B text model '{model_id}' "
-                f"with torch_dtype={torch_dtype}"
-            )
-        else:
-            from utils.quantization import QuantizationConfig, get_model_kwargs
-
-            qconfig = QuantizationConfig()
-            model_kwargs = get_model_kwargs(qconfig, model_type="text")
-            model = AutoModelForCausalLM.from_pretrained(
-                model_id,
-                **model_kwargs,
-            )
-
-        # Ensure model's generation_config has correct token IDs.
-        # Critical for proper generation stopping - mismatches cause
-        # models to generate padding tokens indefinitely.
-        if hasattr(model, 'generation_config'):
+        if hasattr(model, "generation_config"):
             if model.generation_config.eos_token_id is None:
                 model.generation_config.eos_token_id = tokenizer.eos_token_id
-                logger.info(f"Set model.generation_config.eos_token_id = {tokenizer.eos_token_id}")
+                logger.info(
+                    f"Set model.generation_config.eos_token_id = {tokenizer.eos_token_id}"
+                )
             if model.generation_config.pad_token_id is None:
                 model.generation_config.pad_token_id = tokenizer.pad_token_id
-                logger.info(f"Set model.generation_config.pad_token_id = {tokenizer.pad_token_id}")
+                logger.info(
+                    f"Set model.generation_config.pad_token_id = {tokenizer.pad_token_id}"
+                )
             if model.generation_config.bos_token_id is None:
                 model.generation_config.bos_token_id = tokenizer.bos_token_id
-                logger.info(f"Set model.generation_config.bos_token_id = {tokenizer.bos_token_id}")
+                logger.info(
+                    f"Set model.generation_config.bos_token_id = {tokenizer.bos_token_id}"
+                )
 
-        # Verify quantization only for non-4B path (4B default is intentionally
-        # non-quantized to reduce complexity/instability on Kaggle).
-        if not is_default_4b_text:
-            _verify_quantization(model, model_id)
+        _verify_quantization(model, model_id)
 
         logger.info(f"Loaded text model '{model_id}' successfully, wrapping")
         return TextModelWrapper(model=model, tokenizer=tokenizer)

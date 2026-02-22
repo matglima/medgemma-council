@@ -48,7 +48,7 @@ class TestModelFactory:
         """Default text model should be MedGemma 1.5 4B for Kaggle stability."""
         from utils.model_factory import DEFAULT_TEXT_MODEL_ID
 
-        assert DEFAULT_TEXT_MODEL_ID == "google/medgemma-4b-it"
+        assert DEFAULT_TEXT_MODEL_ID == "google/medgemma-1.5-4b-it"
 
     def test_create_text_model_returns_mock_wrapper_by_default(self):
         """In mock mode, create_text_model() should return a MockModelWrapper."""
@@ -436,42 +436,36 @@ class TestLoadRealTextModelPadToken:
         assert mock_tokenizer.pad_token == "<pad>"
 
     def test_4b_text_model_load_skips_quantization_path(self):
-        """4B default text model should load without 27B quantization kwargs.
+        """4B default text model should use official pipeline path.
 
-        This keeps default inference lighter and avoids 27B-specific quantization
-        behavior on Kaggle.
+        This aligns with the upstream MedGemma 1.5 inference recipe and
+        avoids the AutoModelForCausalLM manual-generate path.
         """
         import sys
         from utils.model_factory import ModelFactory
+        from utils.model_wrappers import PipelineTextModelWrapper
 
-        mock_tokenizer = MagicMock()
-        mock_tokenizer.pad_token = "<pad>"
-        mock_tokenizer.pad_token_id = 0
-        mock_tokenizer.eos_token = "</s>"
-        mock_tokenizer.eos_token_id = 1
-        mock_tokenizer.bos_token_id = 2
-
-        mock_model = MagicMock()
-        mock_model.is_quantized = True
+        mock_pipe = MagicMock()
+        mock_pipe.return_value = [{"generated_text": [{"role": "assistant", "content": "ok"}]}]
 
         mock_transformers = MagicMock()
-        mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
-        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
+        mock_transformers.pipeline.return_value = mock_pipe
 
         with patch.dict(os.environ, {"MEDGEMMA_USE_REAL_MODELS": "true"}):
             factory = ModelFactory()
 
         with patch.dict(sys.modules, {"transformers": mock_transformers}):
-            with patch("utils.model_factory._verify_quantization"):
-                with patch("utils.quantization.get_model_kwargs") as mock_get_model_kwargs:
-                    factory._load_real_text_model("google/medgemma-4b-it")
+            with patch("utils.quantization.get_model_kwargs") as mock_get_model_kwargs:
+                wrapper = factory._load_real_text_model("google/medgemma-1.5-4b-it")
 
-        # 4B default path should not invoke quantized 27B kwargs builder
+        assert isinstance(wrapper, PipelineTextModelWrapper)
+
+        # 4B pipeline path should not invoke quantized 27B kwargs builder
         mock_get_model_kwargs.assert_not_called()
-
-        call_kwargs = mock_transformers.AutoModelForCausalLM.from_pretrained.call_args[1]
-        assert "device_map" in call_kwargs
-        assert "quantization_config" not in call_kwargs
+        mock_transformers.pipeline.assert_called_once()
+        call_args = mock_transformers.pipeline.call_args
+        assert call_args.args[0] == "image-text-to-text"
+        assert call_args.kwargs.get("model") == "google/medgemma-1.5-4b-it"
 
 
 class TestTextModelIdEnvVar:
@@ -497,25 +491,42 @@ class TestTextModelIdEnvVar:
         from utils.model_factory import ModelFactory
 
         with patch.dict(os.environ, {
-            "MEDGEMMA_TEXT_MODEL_ID": "google/medgemma-4b-it",
+            "MEDGEMMA_TEXT_MODEL_ID": "google/medgemma-1.5-4b-it",
         }, clear=True):
             factory = ModelFactory()
             model = factory.create_text_model()
 
         # Cache key should use the env var model ID, not the default
-        assert "text:google/medgemma-4b-it" in ModelFactory._model_cache
+        assert "text:google/medgemma-1.5-4b-it" in ModelFactory._model_cache
 
     def test_explicit_model_id_takes_precedence_over_env_var(self):
         """An explicit model_id argument should take precedence over the env var."""
         from utils.model_factory import ModelFactory
 
         with patch.dict(os.environ, {
-            "MEDGEMMA_TEXT_MODEL_ID": "google/medgemma-4b-it",
+            "MEDGEMMA_TEXT_MODEL_ID": "google/medgemma-1.5-4b-it",
         }, clear=True):
             factory = ModelFactory()
             model = factory.create_text_model(model_id="custom/model")
 
         assert "text:custom/model" in ModelFactory._model_cache
+
+    def test_legacy_4b_model_id_alias_normalized(self):
+        """Legacy 4B ID should normalize to medgemma-1.5-4b-it.
+
+        This keeps older notebooks working while moving defaults/docs
+        to the canonical repository name.
+        """
+        from utils.model_factory import ModelFactory
+
+        with patch.dict(os.environ, {
+            "MEDGEMMA_TEXT_MODEL_ID": "google/medgemma-4b-it",
+        }, clear=True):
+            factory = ModelFactory()
+            factory.create_text_model()
+
+        assert "text:google/medgemma-1.5-4b-it" in ModelFactory._model_cache
+        assert "text:google/medgemma-4b-it" not in ModelFactory._model_cache
 
     def test_default_used_when_no_env_var(self):
         """When MEDGEMMA_TEXT_MODEL_ID is not set, the default should be used."""

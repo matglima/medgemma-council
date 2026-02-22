@@ -198,7 +198,7 @@ The pipeline uses sliding-window chunking with configurable overlap and attaches
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock (460 tests) |
+| Testing | pytest + unittest.mock (465 tests) |
 
 ---
 
@@ -282,7 +282,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all 460 tests (< 2 seconds, no GPU needed)
+# Run all 465 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -337,7 +337,7 @@ python council_cli.py \
 ```python
 from council_cli import run_council_cli
 
-# Default: verbose=True (DEBUG-level logging), uses 4B model
+# Default: verbose=True (DEBUG-level logging), uses google/medgemma-1.5-4b-it
 result = run_council_cli(
     age=65,
     sex="Male",
@@ -414,7 +414,7 @@ result = run_council_cli(
 
 print(result["final_plan"])
 
-# Optional: override to 27B model (default already uses 4B)
+# Optional: override to 27B model (default already uses google/medgemma-1.5-4b-it)
 result = run_council_cli(
     age=65,
     sex="Male",
@@ -523,7 +523,7 @@ BitsAndBytesConfig(
 
 The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_USE_REAL_MODELS` env var). In mock mode (default), no GPU is needed. In real mode, models are loaded with automatic tensor parallelism via `accelerate`.
 
-**GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the same model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. `TextModelWrapper` truncates input prompts to `max_input_tokens=4096` to bound KV cache allocation. Generation uses greedy decoding (`do_sample=False`) by default to prevent sampling-mode amplification of numerical errors.
+**GPU Memory Management:** `ModelFactory` uses class-level model caching to prevent loading the same model multiple times during graph execution. Without caching, each graph node (supervisor, specialist, conflict_check, synthesis) would load a fresh model, exhausting VRAM. For `google/medgemma-1.5-4b-it`, text inference follows the official `pipeline("image-text-to-text")` path using chat-formatted messages. Legacy/larger text models still use `TextModelWrapper` with explicit tokenization and `generate()`.
 
 **NaN Logits Stability Guard:** For quantized text inference, model loading now sets both `dtype` and `torch_dtype` in `from_pretrained()` kwargs for cross-version transformers compatibility, and forces `attn_implementation="eager"` for text models. This avoids silent dtype fallback and unstable fused attention kernel selection that can yield `NaN` logits and blank outputs on some Kaggle CUDA/transformers builds.
 
@@ -535,7 +535,7 @@ The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_U
 
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (460 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (465 tests) completes in < 2 seconds.
 
 ---
 

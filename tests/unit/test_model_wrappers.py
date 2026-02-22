@@ -898,6 +898,63 @@ class TestVisionModelWrapper:
         assert call_kwargs.kwargs.get("max_new_tokens") == 512 or \
                (len(call_kwargs.args) > 0 or "max_new_tokens" in str(call_kwargs))
 
+
+class TestPipelineTextModelWrapper:
+    """Tests for pipeline-based text wrapper used by MedGemma 1.5 4B."""
+
+    def test_import(self):
+        """PipelineTextModelWrapper should be importable."""
+        from utils.model_wrappers import PipelineTextModelWrapper
+
+    def test_formats_text_prompt_as_chat_messages(self):
+        """Wrapper should call pipeline with chat-style text messages."""
+        from utils.model_wrappers import PipelineTextModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [{"generated_text": [{"role": "assistant", "content": "ok"}]}]
+
+        wrapper = PipelineTextModelWrapper(pipeline=mock_pipeline)
+        wrapper("Describe this case", max_tokens=123)
+
+        call_kwargs = mock_pipeline.call_args
+        assert call_kwargs.kwargs.get("max_new_tokens") == 123
+        text_arg = call_kwargs.kwargs.get("text")
+        assert isinstance(text_arg, list)
+        assert text_arg[0]["role"] == "user"
+        assert text_arg[0]["content"][0]["type"] == "text"
+        assert text_arg[0]["content"][0]["text"] == "Describe this case"
+
+    def test_extracts_assistant_content_from_official_output_shape(self):
+        """Wrapper should parse output[0]['generated_text'][-1]['content']."""
+        from utils.model_wrappers import PipelineTextModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [
+            {
+                "generated_text": [
+                    {"role": "user", "content": [{"type": "text", "text": "Describe"}]},
+                    {"role": "assistant", "content": "This is a chest X-ray."},
+                ]
+            }
+        ]
+
+        wrapper = PipelineTextModelWrapper(pipeline=mock_pipeline)
+        result = wrapper("Describe")
+
+        assert result["choices"][0]["text"] == "This is a chest X-ray."
+
+    def test_handles_plain_generated_text_string(self):
+        """Wrapper should support pipelines that return generated_text as str."""
+        from utils.model_wrappers import PipelineTextModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.return_value = [{"generated_text": "Clinical assessment."}]
+
+        wrapper = PipelineTextModelWrapper(pipeline=mock_pipeline)
+        result = wrapper("Prompt")
+
+        assert result["choices"][0]["text"] == "Clinical assessment."
+
     # -----------------------------------------------------------------------
     # Chat-format input for MedGemma 4B (Fix #8: image token mismatch)
     # -----------------------------------------------------------------------

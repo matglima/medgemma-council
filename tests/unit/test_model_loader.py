@@ -123,7 +123,7 @@ class TestQuantizedModelLoading:
             mock_load.return_value = MagicMock()
             model = loader.load_vision_model_quantized(
                 name="medgemma-4b-vision",
-                model_id="google/medgemma-4b-it",
+                model_id="google/medgemma-1.5-4b-it",
             )
 
         assert "medgemma-4b-vision" in loader.loaded_models
