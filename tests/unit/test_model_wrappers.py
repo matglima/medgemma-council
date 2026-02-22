@@ -883,6 +883,31 @@ class TestVisionModelWrapper:
         text = result[0]["generated_text"]
         assert "error" in text.lower() or "GPU" in text
 
+    def test_retries_with_lower_tokens_on_cuda_oom(self):
+        """Vision wrapper should retry once with fewer tokens on CUDA OOM."""
+        from utils.model_wrappers import VisionModelWrapper
+
+        mock_pipeline = MagicMock()
+        mock_pipeline.side_effect = [
+            RuntimeError("CUDA out of memory. Tried to allocate 256.00 MiB"),
+            [{"generated_text": "Recovered after retry."}],
+        ]
+
+        wrapper = VisionModelWrapper(pipeline=mock_pipeline)
+
+        with patch("utils.model_wrappers.torch") as mock_torch:
+            mock_torch.cuda.is_available.return_value = True
+            result = wrapper(images=["img.png"], prompt="Analyze this image.", max_new_tokens=1024)
+
+        assert result[0]["generated_text"] == "Recovered after retry."
+        assert mock_pipeline.call_count == 2
+
+        first_kwargs = mock_pipeline.call_args_list[0].kwargs
+        second_kwargs = mock_pipeline.call_args_list[1].kwargs
+        assert first_kwargs["max_new_tokens"] == 1024
+        assert second_kwargs["max_new_tokens"] == 256
+        mock_torch.cuda.empty_cache.assert_called_once()
+
     def test_max_tokens_kwarg(self):
         """VisionModelWrapper should accept max_new_tokens parameter."""
         from utils.model_wrappers import VisionModelWrapper

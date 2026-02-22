@@ -46,6 +46,11 @@ def _normalize_model_id(model_id: str) -> str:
     return normalized
 
 
+def _is_default_4b_model(model_id: str) -> bool:
+    """Return True for canonical MedGemma 1.5 4B IDs."""
+    return "medgemma-1.5-4b" in model_id.lower()
+
+
 def _verify_quantization(model: Any, model_id: str) -> None:
     """
     Verify that a model was actually quantized after loading.
@@ -168,6 +173,22 @@ class ModelFactory:
             logger.debug(f"Cache hit for text model '{model_id}'")
             return ModelFactory._model_cache[cache_key]
 
+        # Reuse a cached 4B vision pipeline when available to avoid loading
+        # a second copy of the same model on GPU.
+        if self.use_real_models and _is_default_4b_model(model_id):
+            vision_cache_key = f"vision:{model_id}"
+            cached_vision = ModelFactory._model_cache.get(vision_cache_key)
+            shared_pipeline = getattr(cached_vision, "pipeline", None)
+            if shared_pipeline is not None:
+                from utils.model_wrappers import PipelineTextModelWrapper
+
+                logger.info(
+                    f"Reusing cached 4B vision pipeline for text model '{model_id}'"
+                )
+                wrapper = PipelineTextModelWrapper(pipeline=shared_pipeline)
+                ModelFactory._model_cache[cache_key] = wrapper
+                return wrapper
+
         if not self.use_real_models:
             from utils.model_wrappers import MockModelWrapper
 
@@ -203,6 +224,22 @@ class ModelFactory:
             logger.debug(f"Cache hit for vision model '{model_id}'")
             return ModelFactory._model_cache[cache_key]
 
+        # Reuse a cached 4B text pipeline when available to avoid loading
+        # a second copy of the same model on GPU.
+        if self.use_real_models and _is_default_4b_model(model_id):
+            text_cache_key = f"text:{model_id}"
+            cached_text = ModelFactory._model_cache.get(text_cache_key)
+            shared_pipeline = getattr(cached_text, "pipeline", None)
+            if shared_pipeline is not None:
+                from utils.model_wrappers import VisionModelWrapper
+
+                logger.info(
+                    f"Reusing cached 4B text pipeline for vision model '{model_id}'"
+                )
+                wrapper = VisionModelWrapper(pipeline=shared_pipeline)
+                ModelFactory._model_cache[cache_key] = wrapper
+                return wrapper
+
         if not self.use_real_models:
             from utils.model_wrappers import MockModelWrapper
 
@@ -228,7 +265,7 @@ class ModelFactory:
 
         Returns a text-capable wrapper for the agent calling convention.
         """
-        is_default_4b_text = "medgemma-1.5-4b" in model_id.lower()
+        is_default_4b_text = _is_default_4b_model(model_id)
 
         if is_default_4b_text:
             from transformers import pipeline  # type: ignore

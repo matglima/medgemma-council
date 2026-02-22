@@ -529,3 +529,37 @@ class TestRadiologyAgentVisionModel:
 
         # Vision model should not have been created
         mock_factory_inst.create_vision_model.assert_not_called()
+
+    @patch("graph.ModelFactory")
+    def test_radiology_skipped_when_no_images_provided(self, MockFactory):
+        """When no medical images are present, RadiologyAgent should be skipped.
+
+        This avoids loading the vision model unnecessarily and reduces CUDA
+        memory pressure on Kaggle.
+        """
+        from graph import _run_specialists
+
+        mock_factory_inst = MagicMock()
+        mock_factory_inst.create_text_model.return_value = MagicMock(name="text_llm")
+        mock_factory_inst.create_vision_model.return_value = MagicMock(name="vision_llm")
+        MockFactory.return_value = mock_factory_inst
+
+        state = {
+            "agent_outputs": {
+                "SupervisorAgent": "Routing to specialists: CardiologyAgent, RadiologyAgent"
+            },
+            "patient_context": {},
+            "medical_images": [],
+        }
+
+        with patch("graph.CardiologyAgent") as MockCardio, \
+             patch("graph.RadiologyAgent") as MockRadiology:
+            MockCardio.return_value.analyze.return_value = {
+                "agent_outputs": {"CardiologyAgent": "ACS likely."}
+            }
+
+            _run_specialists(state)
+
+        MockCardio.assert_called_once()
+        MockRadiology.assert_not_called()
+        mock_factory_inst.create_vision_model.assert_not_called()

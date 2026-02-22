@@ -310,6 +310,30 @@ class TestModelCaching:
 
         assert text_model is not vision_model
 
+    def test_real_4b_vision_reuses_text_pipeline(self):
+        """In real mode, 4B vision wrapper should reuse cached text pipeline.
+
+        This avoids loading a second copy of MedGemma 1.5 4B and helps prevent
+        CUDA OOM on Kaggle GPUs.
+        """
+        from utils.model_factory import ModelFactory
+        from utils.model_wrappers import PipelineTextModelWrapper
+
+        with patch.dict(os.environ, {"MEDGEMMA_USE_REAL_MODELS": "true"}):
+            factory = ModelFactory()
+
+        shared_pipe = MagicMock(name="shared_pipeline")
+        text_wrapper = PipelineTextModelWrapper(pipeline=shared_pipe)
+
+        with patch.object(factory, "_load_real_text_model", return_value=text_wrapper):
+            with patch.object(factory, "_load_real_vision_model") as mock_load_vision:
+                text_model = factory.create_text_model(model_id="google/medgemma-1.5-4b-it")
+                vision_model = factory.create_vision_model(model_id="google/medgemma-1.5-4b-it")
+
+        mock_load_vision.assert_not_called()
+        assert getattr(text_model, "pipeline", None) is shared_pipe
+        assert getattr(vision_model, "pipeline", None) is shared_pipe
+
 
 class TestVerifyQuantization:
     """Tests for post-load quantization verification."""

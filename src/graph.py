@@ -192,6 +192,15 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
     if not activated:
         activated = ["CardiologyAgent"]
 
+    # If no images are provided, radiology cannot add value and would force
+    # loading the heavy vision model unnecessarily.
+    medical_images = state.get("medical_images") or []
+    if "RadiologyAgent" in activated and not medical_images:
+        activated = [name for name in activated if name != "RadiologyAgent"]
+        logger.info("Skipping RadiologyAgent: no medical images provided")
+        if not activated:
+            activated = ["CardiologyAgent"]
+
     llm = factory.create_text_model()
 
     # Create vision model only if RadiologyAgent is activated (avoid loading

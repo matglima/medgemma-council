@@ -423,11 +423,45 @@ class VisionModelWrapper:
     def __init__(self, pipeline: Any) -> None:
         self.pipeline = pipeline
 
+    @staticmethod
+    def _is_cuda_oom_error(error: Exception) -> bool:
+        """Return True when the exception message indicates CUDA OOM."""
+        msg = str(error).lower()
+        return "cuda out of memory" in msg or "outofmemoryerror" in msg
+
+    @staticmethod
+    def _prepare_images(images: List[Any], max_side: int = 1024) -> List[Any]:
+        """Downscale large PIL images to reduce vision inference memory usage."""
+        prepared: List[Any] = []
+        for img in images:
+            try:
+                # PIL Images expose size=(w, h) and copy()/thumbnail().
+                if hasattr(img, "size") and hasattr(img, "copy") and hasattr(img, "thumbnail"):
+                    width, height = img.size
+                    if max(width, height) > max_side:
+                        resized = img.copy()
+                        resized.thumbnail((max_side, max_side))
+                        prepared.append(resized)
+                        continue
+            except Exception:
+                pass
+            prepared.append(img)
+        return prepared
+
+    @staticmethod
+    def _normalize_output(result: Any) -> List[Dict[str, str]]:
+        """Normalize pipeline output to list[{'generated_text': ...}]."""
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            return [result]
+        return [{"generated_text": str(result)}]
+
     def __call__(
         self,
         images: Optional[List[Any]] = None,
         prompt: str = "",
-        max_new_tokens: int = 1024,
+        max_new_tokens: int = 256,
         **kwargs: Any,
     ) -> List[Dict[str, str]]:
         """
@@ -451,6 +485,8 @@ class VisionModelWrapper:
                 f"prompt={len(prompt)} chars"
             )
 
+            prepared_images = self._prepare_images(images)
+
             # Format the prompt as chat messages with image entries.
             # MedGemma 4B IT's pipeline expects images inside the message content:
             #   content = [
@@ -459,16 +495,46 @@ class VisionModelWrapper:
             #   ]
             # The pipeline is called with just the messages, not images= separately.
             content = []
-            for img in images:
+            for img in prepared_images:
                 content.append({"type": "image", "url": img})
             content.append({"type": "text", "text": prompt})
             messages = [{"role": "user", "content": content}]
 
-            result = self.pipeline(
-                text=messages,
-                max_new_tokens=max_new_tokens,
-                **kwargs,
-            )
+            try:
+                result = self.pipeline(
+                    text=messages,
+                    max_new_tokens=max_new_tokens,
+                    **kwargs,
+                )
+            except Exception as e:
+                # Retry once with smaller generation budget when CUDA OOM occurs.
+                if self._is_cuda_oom_error(e) and max_new_tokens > 256:
+                    retry_tokens = max(64, min(256, max_new_tokens // 4))
+                    logger.warning(
+                        "VisionModelWrapper: CUDA OOM at max_new_tokens=%s; "
+                        "retrying with max_new_tokens=%s",
+                        max_new_tokens,
+                        retry_tokens,
+                    )
+
+                    if torch is not None and hasattr(torch, "cuda") and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                    # Retry with a more aggressive image downscale.
+                    retry_images = self._prepare_images(prepared_images, max_side=768)
+                    retry_content = []
+                    for img in retry_images:
+                        retry_content.append({"type": "image", "url": img})
+                    retry_content.append({"type": "text", "text": prompt})
+                    retry_messages = [{"role": "user", "content": retry_content}]
+
+                    result = self.pipeline(
+                        text=retry_messages,
+                        max_new_tokens=retry_tokens,
+                        **kwargs,
+                    )
+                else:
+                    raise
 
             # Log output preview
             if isinstance(result, list) and result:
@@ -479,13 +545,7 @@ class VisionModelWrapper:
                 preview = str(result)[:200]
             logger.debug(f"VisionModelWrapper: output_preview={preview!r}")
 
-            # Normalize output to list format
-            if isinstance(result, list):
-                return result
-            elif isinstance(result, dict):
-                return [result]
-            else:
-                return [{"generated_text": str(result)}]
+            return self._normalize_output(result)
 
         except Exception as e:
             logger.error(f"VisionModelWrapper inference error: {e}")
