@@ -106,7 +106,7 @@ def run_council_cli(
     vitals: Optional[Dict[str, Any]] = None,
     labs: Optional[Dict[str, Any]] = None,
     image_paths: Optional[List[str]] = None,
-    verbose: bool = True,
+    verbose: bool = False,
     text_model_id: Optional[str] = None,
     clear_model_cache: bool = False,
 ) -> Dict[str, Any]:

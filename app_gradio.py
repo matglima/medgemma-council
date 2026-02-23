@@ -176,6 +176,7 @@ def run_council_analysis(
     history: str = "",
     medications: str = "",
     images: Optional[List[str]] = None,
+    progress: Optional[gr.Progress] = None,
 ) -> Tuple[str, str, str]:
     """
     Run the council analysis and return formatted results.
@@ -189,11 +190,17 @@ def run_council_analysis(
         history: Past medical history.
         medications: Comma-separated medication string.
         images: Optional list of image file paths from Gradio upload.
+        progress: Gradio progress tracker for UI feedback.
 
     Returns:
         Tuple of (plan_output, specialists_output, status_output).
     """
-    # Validate inputs
+    def update_progress(p: float, desc: str):
+        if progress:
+            progress(p, desc=desc)
+
+    update_progress(0, "Validating input...")
+
     if not chief_complaint or not chief_complaint.strip():
         return (
             "Please enter a chief complaint to proceed.",
@@ -201,7 +208,7 @@ def run_council_analysis(
             "Status: Awaiting input",
         )
 
-    # Build patient context
+    update_progress(0.1, "Building patient context...")
     patient_ctx = build_patient_context(
         age=age,
         sex=sex,
@@ -210,19 +217,21 @@ def run_council_analysis(
         medications=medications,
     )
 
-    # Process images
+    update_progress(0.15, "Processing images...")
     image_paths = process_uploaded_images(images)
 
-    # Build state
+    update_progress(0.2, "Initializing council graph...")
     state = create_initial_state()
     state["messages"] = [{"role": "user", "content": chief_complaint}]
     state["patient_context"] = patient_ctx
     state["medical_images"] = image_paths
 
-    # Run council
+    update_progress(0.25, "Running specialist analysis...")
     try:
         graph = build_council_graph()
+        update_progress(0.4, "Council debating clinical findings...")
         result = graph.invoke(state)
+        update_progress(0.9, "Synthesizing final plan...")
     except Exception as e:
         logger.error(f"Council execution failed: {e}")
         return (
@@ -231,11 +240,9 @@ def run_council_analysis(
             "Status: Error",
         )
 
-    # Format outputs
     plan = format_plan_output(result.get("final_plan", ""))
     specialists = format_specialists_output(result.get("agent_outputs", {}))
 
-    # Build status summary
     consensus = "Yes" if result.get("consensus_reached") else "No"
     conflict = "Yes" if result.get("conflict_detected") else "No"
     rounds = result.get("iteration_count", 0)
@@ -248,6 +255,7 @@ def run_council_analysis(
         f"**Specialists Consulted:** {n_specialists}"
     )
 
+    update_progress(1.0, "Complete!")
     return plan, specialists, status
 
 

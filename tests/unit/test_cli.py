@@ -267,15 +267,15 @@ class TestVerboseFlag:
         }
         mock_build.return_value = mock_graph
 
-        # Don't pass verbose — should default to True (DEBUG)
+        # Don't pass verbose — should default to False (WARNING)
         with patch("council_cli.logging") as mock_logging:
             run_council_cli(
                 age=65, sex="Male", chief_complaint="Chest pain",
             )
             mock_logging.basicConfig.assert_called()
             call_kwargs = mock_logging.basicConfig.call_args
-            assert call_kwargs[1].get("level") == mock_logging.DEBUG or \
-                   (call_kwargs[0] and call_kwargs[0][0] == mock_logging.DEBUG)
+            assert call_kwargs[1].get("level") == mock_logging.WARNING or \
+                   (call_kwargs[0] and call_kwargs[0][0] == mock_logging.WARNING)
 
 
 class TestTextModelIdFlag:
