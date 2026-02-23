@@ -63,7 +63,7 @@ class MedASRTool:
                 "automatic-speech-recognition",
                 model="openai/whisper-small",  # Lightweight default; swap for MedASR in prod
             )
-            result = asr(audio_path)
+            result = asr(audio_path, return_timestamps=True)
             if isinstance(result, dict):
                 return result.get("text", "")
             return str(result)
