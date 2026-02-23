@@ -271,8 +271,27 @@ def build_gradio_app() -> gr.Blocks:
     Returns:
         A gr.Blocks instance ready to be launched.
     """
+    custom_css = """
+    .plan-output {
+        min-height: 200px;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    .specialists-output {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    .status-output {
+        margin-top: 10px;
+        padding: 10px;
+        background-color: rgba(0, 0, 0, 0.05);
+        border-radius: 8px;
+    }
+    """
+    
     with gr.Blocks(
         title="MedGemma Council",
+        css=custom_css,
     ) as app:
         gr.Markdown(
             "# MedGemma Council of Experts\n"
@@ -332,18 +351,21 @@ def build_gradio_app() -> gr.Blocks:
                 plan_output = gr.Markdown(
                     label="Clinical Management Plan",
                     value="*Submit a case to start the council analysis.*",
+                    elem_classes=["plan-output"],
+                )
+
+                status_output = gr.Markdown(
+                    label="Council Status",
+                    value="",
+                    elem_classes=["status-output"],
                 )
 
                 with gr.Accordion("Specialist Findings", open=False):
                     specialists_output = gr.Markdown(
                         label="Specialist Findings",
                         value="",
+                        elem_classes=["specialists-output"],
                     )
-
-                status_output = gr.Markdown(
-                    label="Council Status",
-                    value="",
-                )
 
         # --- Wire up the submit button ---
         submit_btn.click(
