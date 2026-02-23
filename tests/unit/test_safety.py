@@ -121,6 +121,16 @@ class TestPIIRedaction:
         assert "12345678" not in result
         assert "[REDACTED_MRN]" in result
 
+    def test_redact_pii_handles_non_string_input(self):
+        """Redaction should be resilient to list/dict payloads."""
+        from utils.safety import redact_pii
+
+        payload = [{"role": "assistant", "content": "Patient SSN 123-45-6789."}]
+        result = redact_pii(payload)
+        assert isinstance(result, str)
+        assert "123-45-6789" not in result
+        assert "[REDACTED_SSN]" in result
+
 
 class TestDisclaimer:
     """Tests for the clinical disclaimer system."""

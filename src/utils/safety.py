@@ -32,7 +32,23 @@ _EMERGENCY_REFERRAL_TEMPLATE = (
 )
 
 
-def scan_for_red_flags(text: str) -> Dict[str, Any]:
+def _coerce_to_text(value: Any) -> str:
+    """Convert arbitrary payloads into text for safety processing."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        try:
+            import json
+
+            return json.dumps(value)
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def scan_for_red_flags(text: Any) -> Dict[str, Any]:
     """
     Scan text for clinical red flags that require emergency intervention.
 
@@ -45,10 +61,11 @@ def scan_for_red_flags(text: str) -> Dict[str, Any]:
             flags (List[str]): List of detected flag labels.
             emergency_message (str): Override message if flagged, else empty.
     """
+    scanned_text = _coerce_to_text(text)
     detected_flags: List[str] = []
 
     for pattern, label in _RED_FLAG_PATTERNS:
-        if pattern.search(text):
+        if pattern.search(scanned_text):
             if label not in detected_flags:
                 detected_flags.append(label)
 
@@ -80,7 +97,7 @@ _PII_PATTERNS = [
 ]
 
 
-def redact_pii(text: str) -> str:
+def redact_pii(text: Any) -> str:
     """
     Redact Protected Health Information (PHI/PII) from text.
 
@@ -92,7 +109,7 @@ def redact_pii(text: str) -> str:
     Returns:
         Text with PII replaced by redaction placeholders.
     """
-    result = text
+    result = _coerce_to_text(text)
     for pattern, replacement in _PII_PATTERNS:
         result = pattern.sub(replacement, result)
     return result

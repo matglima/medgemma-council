@@ -71,6 +71,10 @@ class GuidelineChunker:
 
             chunks.append({
                 "text": chunk_text,
+                # Legacy flat keys retained for backward compatibility with
+                # older notebook examples.
+                "source": source,
+                "chunk_index": chunk_index,
                 "metadata": {
                     "source": source,
                     "chunk_index": chunk_index,
@@ -108,12 +112,21 @@ class IngestionPipeline:
 
     def __init__(
         self,
-        persist_dir: str,
+        persist_dir: Optional[str] = None,
         collection_name: str = "guidelines",
         chunk_size: int = 1024,
         chunk_overlap: int = 128,
+        persist_directory: Optional[str] = None,
     ) -> None:
-        self.persist_dir = persist_dir
+        # Backward-compatible alias for older notebook examples.
+        resolved_persist_dir = persist_dir or persist_directory
+        if resolved_persist_dir is None:
+            raise TypeError(
+                "IngestionPipeline.__init__() missing required argument: "
+                "'persist_dir'"
+            )
+
+        self.persist_dir = resolved_persist_dir
         self.collection_name = collection_name
         self.chunker = GuidelineChunker(
             chunk_size=chunk_size,

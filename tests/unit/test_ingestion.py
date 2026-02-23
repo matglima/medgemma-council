@@ -82,6 +82,18 @@ class TestGuidelineChunker:
         for i, chunk in enumerate(chunks):
             assert chunk["metadata"]["chunk_index"] == i
 
+    def test_chunk_text_exposes_legacy_top_level_metadata_fields(self):
+        """Chunks should keep legacy top-level keys for notebook compatibility."""
+        from tools.ingestion import GuidelineChunker
+
+        chunker = GuidelineChunker(chunk_size=50, chunk_overlap=10)
+        text = "A" * 100
+        chunks = chunker.chunk_text(text, source="legacy.pdf")
+
+        for i, chunk in enumerate(chunks):
+            assert chunk["source"] == "legacy.pdf"
+            assert chunk["chunk_index"] == i
+
     def test_chunk_overlap_creates_overlap(self):
         """Adjacent chunks should share overlapping text."""
         from tools.ingestion import GuidelineChunker
@@ -146,6 +158,13 @@ class TestIngestionPipeline:
 
         pipeline = IngestionPipeline(persist_dir="/fake")
         assert pipeline.collection_name == "guidelines"
+
+    def test_init_accepts_legacy_persist_directory_alias(self):
+        """Constructor should accept persist_directory for older notebooks."""
+        from tools.ingestion import IngestionPipeline
+
+        pipeline = IngestionPipeline(persist_directory="/legacy/path")
+        assert pipeline.persist_dir == "/legacy/path"
 
     def test_ingest_file_calls_chunker(self):
         """ingest_file() should read the file and call the chunker."""
