@@ -14,6 +14,32 @@ logger = logging.getLogger(__name__)
 _SUPPORTED_DOC_EXTENSIONS = {".pdf", ".txt", ".md"}
 
 
+def _module_repo_root() -> str:
+    """Return repository root path for this source tree."""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _resolve_runtime_path(path: str) -> str:
+    """Resolve relative paths robustly across notebook working directories.
+
+    Resolution order for relative inputs:
+    1. Current working directory (if path exists there)
+    2. Repository root (if path exists there)
+    3. Repository-root-relative fallback (for paths that may be created later)
+    """
+    if os.path.isabs(path):
+        return path
+
+    cwd_candidate = os.path.abspath(path)
+    repo_candidate = os.path.abspath(os.path.join(_module_repo_root(), path))
+
+    if os.path.exists(cwd_candidate):
+        return cwd_candidate
+    if os.path.exists(repo_candidate):
+        return repo_candidate
+    return repo_candidate
+
+
 class RAGTool:
     """
     Retrieval-Augmented Generation tool backed by ChromaDB.
@@ -29,11 +55,17 @@ class RAGTool:
         reference_docs_dir: str = "data/reference_docs",
         auto_bootstrap: bool = True,
     ) -> None:
-        self.persist_dir = persist_dir
+        self.persist_dir = _resolve_runtime_path(persist_dir)
         self.collection_name = collection_name
-        self.reference_docs_dir = reference_docs_dir
+        self.reference_docs_dir = _resolve_runtime_path(reference_docs_dir)
         self.auto_bootstrap = auto_bootstrap
         self._bootstrap_checked = False
+
+        logger.debug(
+            "RAGTool init: persist_dir=%s, reference_docs_dir=%s",
+            self.persist_dir,
+            self.reference_docs_dir,
+        )
 
     def query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """

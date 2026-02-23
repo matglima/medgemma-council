@@ -28,6 +28,51 @@ class TestRAGTool:
         assert tool.collection_name == "guidelines"
         assert "reference_docs" in tool.reference_docs_dir
 
+    def test_init_resolves_relative_paths_to_repo_when_cwd_missing(self, tmp_path, monkeypatch):
+        """Relative paths should resolve to repo root if cwd path is absent."""
+        from tools import rag_tool as rag_module
+
+        repo_root = tmp_path / "repo"
+        repo_vector = repo_root / "data" / "vector_store"
+        repo_docs = repo_root / "data" / "reference_docs"
+        repo_vector.mkdir(parents=True)
+        repo_docs.mkdir(parents=True)
+
+        outside_cwd = tmp_path / "outside"
+        outside_cwd.mkdir()
+        monkeypatch.chdir(outside_cwd)
+        monkeypatch.setattr(rag_module, "_module_repo_root", lambda: str(repo_root))
+
+        tool = rag_module.RAGTool(
+            persist_dir="data/vector_store",
+            reference_docs_dir="data/reference_docs",
+        )
+
+        assert tool.persist_dir == str(repo_vector)
+        assert tool.reference_docs_dir == str(repo_docs)
+
+    def test_init_prefers_cwd_relative_paths_when_present(self, tmp_path, monkeypatch):
+        """If cwd already has relative data dirs, use cwd-relative paths."""
+        from tools import rag_tool as rag_module
+
+        cwd = tmp_path / "cwd"
+        cwd_vector = cwd / "data" / "vector_store"
+        cwd_docs = cwd / "data" / "reference_docs"
+        cwd_vector.mkdir(parents=True)
+        cwd_docs.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+
+        repo_root = tmp_path / "repo"
+        monkeypatch.setattr(rag_module, "_module_repo_root", lambda: str(repo_root))
+
+        tool = rag_module.RAGTool(
+            persist_dir="data/vector_store",
+            reference_docs_dir="data/reference_docs",
+        )
+
+        assert tool.persist_dir == str(cwd_vector)
+        assert tool.reference_docs_dir == str(cwd_docs)
+
     def test_query_returns_results(self):
         """query() must return a list of retrieved text chunks."""
         from tools.rag_tool import RAGTool

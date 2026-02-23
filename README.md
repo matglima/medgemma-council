@@ -212,7 +212,7 @@ The pipeline uses sliding-window chunking with configurable overlap and attaches
 | UI (Primary) | Gradio |
 | UI (Alternative) | Streamlit |
 | State Schema | Python TypedDict |
-| Testing | pytest + unittest.mock (481 tests) |
+| Testing | pytest + unittest.mock (483 tests) |
 
 ---
 
@@ -297,7 +297,7 @@ pip install -r requirements.txt
 ### Running Tests
 
 ```bash
-# Run all 481 tests (< 2 seconds, no GPU needed)
+# Run all 483 tests (< 2 seconds, no GPU needed)
 pytest tests/ -v
 
 # Run only unit tests
@@ -553,7 +553,7 @@ The `ModelFactory` class manages model creation with a feature flag (`MEDGEMMA_U
 
 ### Local Development
 
-Tests run without any GPU -- all model calls are mocked. The full test suite (481 tests) completes in < 2 seconds.
+Tests run without any GPU -- all model calls are mocked. The full test suite (483 tests) completes in < 2 seconds.
 
 ---
 
