@@ -92,6 +92,9 @@ class CouncilState(TypedDict):
     red_flag_detected: bool
     emergency_override: str
 
+    # Research control
+    force_research: bool
+
 
 # ---------------------------------------------------------------------------
 # Agent factories (create fresh instances; tests patch the classes)
@@ -336,22 +339,42 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "final_plan": "",
         "red_flag_detected": False,
         "emergency_override": "",
+        "force_research": False,
     }
 
 
 def supervisor_route_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Supervisor analyzes the case and determines which specialists to consult.
+    Also checks if research should be triggered before specialist discussions
+    based on case complexity indicators.
     """
     logger.info("Supervisor routing node: determining specialists")
 
     supervisor = _make_supervisor()
     specialists = supervisor.route(state)
 
+    patient_context = state.get("patient_context", {})
+    chief_complaint = patient_context.get("chief_complaint", "").lower()
+    history = patient_context.get("history", "").lower()
+
+    research_keywords = [
+        "controversial", "unclear", "complex", "rare", "novel",
+        "conflicting", "experimental", "guideline", "protocol",
+        "clinical trial", "off-label", "multi-disciplinary"
+    ]
+    needs_research = any(kw in chief_complaint or kw in history for kw in research_keywords)
+    user_force_research = state.get("force_research", False)
+    should_force_research = needs_research or user_force_research
+
+    if should_force_research:
+        logger.info("Supervisor routing: case may benefit from research")
+
     return {
         "agent_outputs": {
             supervisor.name: f"Routing to specialists: {', '.join(specialists)}"
         },
+        "force_research": should_force_research,
     }
 
 
@@ -538,15 +561,17 @@ def _should_continue_after_conflict(state: Dict[str, Any]) -> str:
     After conflict check, decide whether to debate or synthesize.
 
     Returns:
-        "research" if conflict detected and under max iterations.
-        "synthesis" if no conflict or max iterations reached.
+        "research" if conflict detected (or force_research) and under max iterations.
+        "synthesis" if no conflict and not forcing research, or max iterations reached.
     """
     conflict = state.get("conflict_detected", False)
+    force_research = state.get("force_research", False)
     iteration = state.get("iteration_count", 0)
 
-    if conflict and iteration < MAX_DEBATE_ROUNDS:
+    if (conflict or force_research) and iteration < MAX_DEBATE_ROUNDS:
+        reason = "Force research" if force_research and not conflict else "Conflict detected"
         logger.info(
-            f"Conflict detected (iteration {iteration}/{MAX_DEBATE_ROUNDS}), "
+            f"{reason} (iteration {iteration}/{MAX_DEBATE_ROUNDS}), "
             "routing to research -> debate"
         )
         return "research"
@@ -566,12 +591,27 @@ def _should_continue_after_conflict(state: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _should_research_before_specialists(state: Dict[str, Any]) -> str:
+    """
+    After supervisor routing, decide whether to do research before specialist discussions.
+
+    Returns:
+        "do_research_first" if force_research is True, otherwise "run_specialists".
+    """
+    if state.get("force_research", False):
+        logger.info("Force research flag set, routing to research before specialists")
+        return "do_research_first"
+    return "run_specialists"
+
+
 def build_council_graph():
     """
     Construct and compile the MedGemma-Council LangGraph state machine.
 
     Topology:
-        ingestion -> supervisor_route -> specialist -> safety_check
+        ingestion -> supervisor_route
+          -> [force_research] -> research -> specialist -> safety_check
+          -> [no force] -> specialist -> safety_check
           -> [red_flag] -> emergency_synthesis -> END
           -> [safe] -> conflict_check
             -> [conflict & under max] -> research -> debate -> conflict_check
@@ -596,7 +636,21 @@ def build_council_graph():
     # Linear edges
     graph.set_entry_point("ingestion")
     graph.add_edge("ingestion", "supervisor_route")
-    graph.add_edge("supervisor_route", "specialist")
+
+    # Conditional: after supervisor routing, either do research first or go directly to specialists
+    graph.add_conditional_edges(
+        "supervisor_route",
+        _should_research_before_specialists,
+        {
+            "do_research_first": "research",
+            "run_specialists": "specialist",
+        },
+    )
+
+    # Research flows to debate (not directly to specialist)
+    # The flow is: research -> debate -> conflict_check -> (research OR specialist)
+    # This prevents double-calling conflict_check
+
     graph.add_edge("specialist", "safety_check")
 
     # Conditional: after safety check, either emergency or normal flow

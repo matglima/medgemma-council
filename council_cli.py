@@ -54,6 +54,7 @@ def build_state(
     vitals: Optional[Dict[str, Any]] = None,
     labs: Optional[Dict[str, Any]] = None,
     image_paths: Optional[List[str]] = None,
+    force_research: bool = False,
 ) -> Dict[str, Any]:
     """
     Build a valid CouncilState from patient parameters.
@@ -67,6 +68,9 @@ def build_state(
         vitals: Dict of vital signs.
         labs: Dict of lab values.
         image_paths: List of file paths to medical images.
+        force_research: If True, force the research agent to be triggered
+            regardless of whether a conflict is detected. Useful for complex
+            cases requiring evidence-based research even when specialists agree.
 
     Returns:
         A valid CouncilState dictionary ready for graph invocation.
@@ -94,6 +98,9 @@ def build_state(
         "conflict_detected": False,
         "iteration_count": 0,
         "final_plan": "",
+        "red_flag_detected": False,
+        "emergency_override": "",
+        "force_research": force_research,
     }
 
 
@@ -109,6 +116,7 @@ def run_council_cli(
     verbose: bool = False,
     text_model_id: Optional[str] = None,
     clear_model_cache: bool = False,
+    force_research: bool = False,
 ) -> Dict[str, Any]:
     """
     Run the MedGemma Council and return the full result state.
@@ -136,6 +144,11 @@ def run_council_cli(
         clear_model_cache: If True, clear the model cache before running.
             Use this if you see CUDA errors (CUBLAS_STATUS_ALLOC_FAILED)
             which indicate corrupted GPU state from a previous run.
+        force_research: If True, force the research agent to be triggered
+            regardless of whether specialists disagree. This is useful for
+            complex cases requiring evidence-based research even when
+            specialists initially agree. The supervisor can also trigger
+            research before specialist discussions if it judges it necessary.
 
     Returns:
         The final CouncilState dict after graph execution.
@@ -178,6 +191,7 @@ def run_council_cli(
         vitals=vitals,
         labs=labs,
         image_paths=image_paths,
+        force_research=force_research,
     )
 
     try:
@@ -313,6 +327,10 @@ def main():
         "--quiet", action="store_true",
         help="Reduce logging to WARNING level (default is verbose/DEBUG)",
     )
+    parser.add_argument(
+        "--force-research", action="store_true",
+        help="Force the research agent to be triggered regardless of conflict detection",
+    )
 
     args = parser.parse_args()
 
@@ -325,6 +343,7 @@ def main():
         image_paths=args.images,
         verbose=not args.quiet,
         text_model_id=args.model_id,
+        force_research=args.force_research,
     )
 
     print(format_result(result, output_format=args.output))
