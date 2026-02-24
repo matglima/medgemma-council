@@ -101,6 +101,7 @@ def build_state(
         "red_flag_detected": False,
         "emergency_override": "",
         "force_research": force_research,
+        "specialists_completed": False,
     }
 
 

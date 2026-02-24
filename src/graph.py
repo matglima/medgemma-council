@@ -94,6 +94,7 @@ class CouncilState(TypedDict):
 
     # Research control
     force_research: bool
+    specialists_completed: bool
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +342,7 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "red_flag_detected": False,
         "emergency_override": "",
         "force_research": state.get("force_research", False),
+        "specialists_completed": False,
     }
 
 
@@ -391,7 +393,7 @@ def specialist_node(state: Dict[str, Any]) -> Dict[str, Any]:
     current_outputs = dict(state.get("agent_outputs", {}))
     current_outputs.update(specialist_outputs)
 
-    return {"agent_outputs": current_outputs}
+    return {"agent_outputs": current_outputs, "specialists_completed": True}
 
 
 def safety_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -483,7 +485,7 @@ def emergency_synthesis_node(state: Dict[str, Any]) -> Dict[str, Any]:
 def conflict_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Supervisor checks for contradictions between specialist outputs.
-    Clears force_research flag after first research cycle.
+    Clears force_research flag after specialists have run.
     """
     logger.info("Conflict check node: detecting disagreements")
 
@@ -491,14 +493,16 @@ def conflict_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
     agent_outputs = state.get("agent_outputs", {})
     conflict = supervisor.detect_conflict(agent_outputs)
 
-    # Clear force_research after first research cycle to prevent infinite loop
-    # The research has been fetched, now normal conflict detection takes over
-    current_iteration = state.get("iteration_count", 0)
+    # Clear force_research after specialists have run to prevent infinite loop
+    # This ensures research only runs once before specialists
+    specialists_completed = state.get("specialists_completed", False)
     was_force_research = state.get("force_research", False)
+
+    new_force_research = False if (was_force_research and specialists_completed) else state.get("force_research", False)
 
     return {
         "conflict_detected": conflict,
-        "force_research": False if was_force_research and current_iteration > 0 else state.get("force_research", False),
+        "force_research": new_force_research,
     }
 
 
@@ -614,6 +618,21 @@ def _should_research_before_specialists(state: Dict[str, Any]) -> str:
     return "run_specialists"
 
 
+def _research_destination(state: Dict[str, Any]) -> str:
+    """
+    After research node, decide where to go next.
+
+    Returns:
+        "specialist" if specialists haven't run yet, otherwise "debate".
+    """
+    specialists_completed = state.get("specialists_completed", False)
+    if not specialists_completed:
+        logger.info("Initial research complete, routing to specialists")
+        return "specialist"
+    logger.info("Research for conflict resolution, routing to debate")
+    return "debate"
+
+
 def build_council_graph():
     """
     Construct and compile the MedGemma-Council LangGraph state machine.
@@ -657,9 +676,17 @@ def build_council_graph():
         },
     )
 
-    # Research flows to debate (not directly to specialist)
-    # The flow is: research -> debate -> conflict_check -> (research OR specialist)
-    # This prevents double-calling conflict_check
+    # Research destination: conditional based on whether specialists have run
+    # - If specialists haven't run yet (specialists_completed=False): goes to specialist
+    # - If specialists have run (specialists_completed=True): goes to debate
+    graph.add_conditional_edges(
+        "research",
+        _research_destination,
+        {
+            "specialist": "specialist",
+            "debate": "debate",
+        },
+    )
 
     graph.add_edge("specialist", "safety_check")
 
@@ -686,8 +713,7 @@ def build_council_graph():
         },
     )
 
-    # Debate loop: research -> debate -> back to conflict_check
-    graph.add_edge("research", "debate")
+    # Debate goes back to conflict_check for next iteration
     graph.add_edge("debate", "conflict_check")
 
     # Synthesis terminates the graph

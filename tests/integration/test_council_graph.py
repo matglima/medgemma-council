@@ -48,6 +48,7 @@ def base_state(sample_patient_context, sample_medical_images):
         "red_flag_detected": False,
         "emergency_override": "",
         "force_research": False,
+        "specialists_completed": False,
     }
 
 
