@@ -329,6 +329,7 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     - Ensures required fields are present.
     - Resets orchestration counters for a fresh run.
+    - Preserves force_research if already set by user.
     """
     logger.info("Ingestion node: validating patient state")
 
@@ -339,7 +340,7 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "final_plan": "",
         "red_flag_detected": False,
         "emergency_override": "",
-        "force_research": False,
+        "force_research": state.get("force_research", False),
     }
 
 
@@ -482,6 +483,7 @@ def emergency_synthesis_node(state: Dict[str, Any]) -> Dict[str, Any]:
 def conflict_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Supervisor checks for contradictions between specialist outputs.
+    Clears force_research flag after first research cycle.
     """
     logger.info("Conflict check node: detecting disagreements")
 
@@ -489,7 +491,15 @@ def conflict_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
     agent_outputs = state.get("agent_outputs", {})
     conflict = supervisor.detect_conflict(agent_outputs)
 
-    return {"conflict_detected": conflict}
+    # Clear force_research after first research cycle to prevent infinite loop
+    # The research has been fetched, now normal conflict detection takes over
+    current_iteration = state.get("iteration_count", 0)
+    was_force_research = state.get("force_research", False)
+
+    return {
+        "conflict_detected": conflict,
+        "force_research": False if was_force_research and current_iteration > 0 else state.get("force_research", False),
+    }
 
 
 def research_node(state: Dict[str, Any]) -> Dict[str, Any]:

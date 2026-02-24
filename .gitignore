@@ -26,3 +26,5 @@ venv/
 data/vector_store/*.db
 data/uploads/*
 !data/uploads/.gitkeep
+
+KAGGLE_*.md
