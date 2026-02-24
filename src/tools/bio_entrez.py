@@ -4,8 +4,6 @@ PubMed Tool: Bio.Entrez wrapper for the Research Agent.
 Wraps NCBI E-utilities (esearch, efetch) via Biopython to search PubMed
 and retrieve article abstracts. All network calls are isolated in
 _esearch/_efetch methods for easy mocking in tests.
-
-Per CLAUDE.md: Research Agent must provide PMIDs for all claims.
 """
 
 import logging
