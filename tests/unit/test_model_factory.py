@@ -520,7 +520,7 @@ class TestLoadRealTextModelPadToken:
             factory._load_real_text_model("google/medgemma-1.5-4b-it")
 
         call_args = mock_transformers.pipeline.call_args
-        assert call_args.kwargs.get("device_map") == "balanced_low_0"
+        assert call_args.kwargs.get("device_map") == "auto"
         assert call_args.kwargs.get("max_memory") == {0: "14GiB", 1: "14GiB"}
         assert "device" not in call_args.kwargs
 

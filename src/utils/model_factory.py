@@ -297,11 +297,11 @@ class ModelFactory:
 
             load_mode = "cpu"
             if cuda_available and gpu_count >= 2:
-                # Encourage model sharding across both GPUs in dual-T4 Kaggle
-                # sessions; this prevents all weights from landing on cuda:0.
-                pipe_kwargs["device_map"] = "balanced_low_0"
+                # Use "auto" for dual-T4 Kaggle sessions to properly distribute
+                # both model weights AND inference computation across both GPUs.
+                pipe_kwargs["device_map"] = "auto"
                 pipe_kwargs["max_memory"] = {i: "14GiB" for i in range(gpu_count)}
-                load_mode = f"balanced_low_0 across {gpu_count} GPUs"
+                load_mode = f"auto across {gpu_count} GPUs"
             elif cuda_available:
                 pipe_kwargs["device"] = "cuda"
                 load_mode = "single GPU (cuda:0)"
@@ -398,7 +398,8 @@ class ModelFactory:
         Isolated for mocking in tests.
 
         Uses transformers pipeline("image-text-to-text") with
-        torch_dtype=bfloat16 on a single T4 GPU.
+        torch_dtype=bfloat16. On dual-T4, uses device_map="auto" with
+        max_memory to distribute across both GPUs.
 
         Returns a VisionModelWrapper for agent-compatible calling convention.
         """
@@ -407,12 +408,25 @@ class ModelFactory:
 
         from utils.model_wrappers import VisionModelWrapper
 
-        pipe = pipeline(
-            "image-text-to-text",
-            model=model_id,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-        )
+        gpu_count = 0
+        if torch.cuda.is_available():
+            gpu_count = torch.cuda.device_count()
+
+        pipe_kwargs: Dict[str, Any] = {
+            "model": model_id,
+            "torch_dtype": torch.bfloat16,
+            "device_map": "auto",
+        }
+
+        if gpu_count >= 2:
+            pipe_kwargs["max_memory"] = {i: "14GiB" for i in range(gpu_count)}
+
+        pipe = pipeline("image-text-to-text", **pipe_kwargs)
+
+        hf_device_map = getattr(getattr(pipe, "model", None), "hf_device_map", None)
+        if isinstance(hf_device_map, dict):
+            used_devices = sorted({str(device) for device in hf_device_map.values()})
+            logger.info(f"4B vision pipeline hf_device_map devices: {used_devices}")
 
         logger.info(f"Loaded vision model '{model_id}' successfully, wrapping")
         return VisionModelWrapper(pipeline=pipe)

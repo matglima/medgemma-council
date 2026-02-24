@@ -339,11 +339,11 @@ class TestGetDeviceMap:
     """Tests for device map generation."""
 
     def test_get_device_map_dual_gpu(self):
-        """For 2 GPUs, should return 'auto' device map."""
+        """For 2+ GPUs, should return 'balanced' device map for explicit distribution."""
         from utils.quantization import get_device_map
 
         device_map = get_device_map(gpu_count=2)
-        assert device_map == "auto"
+        assert device_map == "balanced"
 
     def test_get_device_map_single_gpu(self):
         """For 1 GPU, should return 'auto' device map."""
@@ -376,7 +376,7 @@ class TestGetModelKwargs:
                     kwargs = get_model_kwargs(qconfig)
 
         assert "device_map" in kwargs
-        assert kwargs["device_map"] == "auto"
+        assert kwargs["device_map"] == "balanced"
 
     def test_get_model_kwargs_includes_quantization_config(self):
         """get_model_kwargs() should include quantization_config."""

@@ -212,11 +212,13 @@ def get_device_map(gpu_count: int) -> Union[str, Dict[str, Any]]:
         gpu_count: Number of available GPUs.
 
     Returns:
-        'auto' for GPU setups (lets accelerate handle distribution),
-        'cpu' for CPU-only.
+        'balanced' for multi-GPU (explicitly distributes across all GPUs),
+        'auto' for single GPU, 'cpu' for CPU-only.
     """
     if gpu_count == 0:
         return "cpu"
+    if gpu_count >= 2:
+        return "balanced"
     return "auto"
 
 
