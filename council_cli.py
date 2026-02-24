@@ -262,6 +262,16 @@ def format_result(result: Dict[str, Any], output_format: str = "text") -> str:
     sections.append(f"{'='*60}")
     sections.append(final_plan)
     sections.append("")
+    
+    # --- FIX START: Add Research Findings Section ---
+    research = result.get("research_findings", "")
+    if research:
+        sections.append(f"{'-'*60}")
+        sections.append("RESEARCH EVIDENCE")
+        sections.append(f"{'-'*60}")
+        sections.append(redact_pii(_stringify_output(research)))
+        sections.append("")
+    # --- FIX END ---
 
     # Specialist findings
     agent_outputs = result.get("agent_outputs", {})

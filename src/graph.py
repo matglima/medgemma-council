@@ -224,8 +224,31 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
 
     outputs: Dict[str, str] = {}
 
+    # --- FIX START: Inject Research Context for Agents ---
+    # We create a temporary copy of the state for the agents.
+    # If research exists, we append it to the history so the LLM sees it
+    # as critical context, without permanently modifying the global patient record.
+    agent_state = state.copy()
+    research_findings = state.get("research_findings", "")
+    
+    if research_findings:
+        logger.info("Injecting research findings into specialist context")
+        # Deep copy patient_context to avoid mutating the global state
+        patient_context = dict(state.get("patient_context", {}))
+        original_history = patient_context.get("history", "")
+        
+        # Append findings to history
+        patient_context["history"] = (
+            f"{original_history}\n\n"
+            f"--- RELEVANT RESEARCH EVIDENCE ---\n"
+            f"{research_findings}\n"
+            f"----------------------------------"
+        )
+        agent_state["patient_context"] = patient_context
+    # --- FIX END ---
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit each specialist as a parallel task
+        # Submit each specialist as a parallel task using agent_state
         future_to_name = {}
         for agent_name in activated:
             agent_cls = agent_registry[agent_name]
@@ -233,7 +256,7 @@ def _run_specialists(state: Dict[str, Any]) -> Dict[str, str]:
             # all other agents use the text model (TextModelWrapper).
             agent_llm = vision_llm if agent_name == "RadiologyAgent" else llm
             future = executor.submit(
-                _run_single_specialist, agent_name, agent_cls, agent_llm, state
+                _run_single_specialist, agent_name, agent_cls, agent_llm, agent_state
             )
             future_to_name[future] = agent_name
 
