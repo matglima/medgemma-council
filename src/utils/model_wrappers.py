@@ -260,6 +260,7 @@ class TextModelWrapper:
             output_ids = self.model.generate(
                 **gen_inputs,
                 max_new_tokens=max_tokens,
+                max_length=None,
                 **generate_kwargs,
             )
 
@@ -397,6 +398,8 @@ class PipelineTextModelWrapper:
             result = self.pipeline(
                 text=messages,
                 max_new_tokens=max_tokens,
+                max_length=None,
+                pad_token_id=self.pipeline.tokenizer.pad_token_id if hasattr(self.pipeline, 'tokenizer') and self.pipeline.tokenizer.pad_token_id is not None else 1,
                 **kwargs,
             )
 
@@ -510,6 +513,8 @@ class VisionModelWrapper:
                 result = self.pipeline(
                     text=messages,
                     max_new_tokens=max_new_tokens,
+                    max_length=None,
+                    pad_token_id=self.pipeline.tokenizer.pad_token_id if hasattr(self.pipeline, 'tokenizer') and self.pipeline.tokenizer.pad_token_id is not None else 1,
                     **kwargs,
                 )
             except Exception as e:
@@ -537,6 +542,8 @@ class VisionModelWrapper:
                     result = self.pipeline(
                         text=retry_messages,
                         max_new_tokens=retry_tokens,
+                        max_length=None,
+                        pad_token_id=self.pipeline.tokenizer.pad_token_id if hasattr(self.pipeline, 'tokenizer') and self.pipeline.tokenizer.pad_token_id is not None else 1,
                         **kwargs,
                     )
                 else:
