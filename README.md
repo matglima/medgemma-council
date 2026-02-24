@@ -1,7 +1,9 @@
 # MedGemma-Council
 
+![MedGemma Council Demo](assets/Gemini_Generated_Image_we5i2bwe5i2bwe5i.png)
+
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-451%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-483%20passing-brightgreen.svg)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-purple.svg)](https://github.com/langchain-ai/langgraph)
 
@@ -60,10 +62,6 @@
                                    END       │  Debate   │───────┘
                                              └───────────┘
 ```
-
-### Demo
-
-![MedGemma Council Demo](assets/Gemini_Generated_Image_we5i2bwe5i2bwe5i.png)
 
 ### Council Topology
 
