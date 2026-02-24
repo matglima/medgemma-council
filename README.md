@@ -61,6 +61,10 @@
                                              └───────────┘
 ```
 
+### Demo
+
+![MedGemma Council Demo](assets/Gemini_Generated_Image_we5i2bwe5i2bwe5i.png)
+
 ### Council Topology
 
 The system implements a **9-node LangGraph StateGraph** with a conditional debate loop and safety override:
